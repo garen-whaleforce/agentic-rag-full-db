@@ -175,6 +175,9 @@ def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
         financials_text = _summarize_financials(context.get("financials"))
         agent_output = main_agent.run(facts, row, mem_txt=None, original_transcript=transcript_text, financial_statements_facts=financials_text)
 
+    if not isinstance(agent_output, dict):
+        agent_output = {"raw_output": agent_output}
+
     def _infer_direction(summary: Optional[str]) -> tuple[str, Optional[float]]:
         if not summary:
             return "UNKNOWN", None
