@@ -36,14 +36,12 @@ def get_company_profile(symbol: str) -> Dict:
     if not symbol:
         return {}
     _require_api_key()
-    try:
-        with _get_client() as client:
-            resp = _get(client, f"profile/{symbol}", params={"apikey": FMP_API_KEY})
-            resp.raise_for_status()
-            data = resp.json() or []
-    except httpx.HTTPStatusError:
-        # Some symbols may not have profile; fall back to empty profile
-        return {}
+    with _get_client() as client:
+        resp = _get(client, f"profile/{symbol}", params={"apikey": FMP_API_KEY})
+        resp.raise_for_status()
+        data = resp.json() or []
+    if not data:
+        raise ValueError(f"Company profile not found for {symbol}")
     first = data[0] if data else {}
     return {
         "company": first.get("companyName") or first.get("name"),
