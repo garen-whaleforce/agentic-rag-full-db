@@ -126,7 +126,8 @@ def compute_post_return(symbol: str, call_date: str, days: int = 3) -> Dict[str,
         return {"return": None}
 
     start = call_dt + timedelta(days=0)
-    end = call_dt + timedelta(days=days + 2)  # buffer to catch weekends/holidays
+    # broaden buffer to catch weekends/holidays; allow up to ~10 extra calendar days
+    end = call_dt + timedelta(days=days + 10)
     prices = _historical_prices(symbol, start, end)
     if not prices:
         return {"return": None}
@@ -136,9 +137,7 @@ def compute_post_return(symbol: str, call_date: str, days: int = 3) -> Dict[str,
     if not start_row:
         return {"return": None}
     start_idx = prices.index(start_row)
-    end_idx = start_idx + days
-    if end_idx >= len(prices):
-        return {"return": None}
+    end_idx = min(start_idx + days, len(prices) - 1)
     end_row = prices[end_idx]
     try:
         start_price = float(start_row.get("close"))
