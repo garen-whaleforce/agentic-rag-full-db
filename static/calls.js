@@ -51,7 +51,7 @@ async function loadCalls() {
         <td>${row.post_return != null ? fmtPct(row.post_return) : "-"}</td>
         <td>${row.prediction || "-"}</td>
         <td>${row.confidence != null ? (row.confidence * 100).toFixed(0) + "%" : "-"}</td>
-        <td><a href="call_detail.html?job_id=${row.job_id}">詳情</a></td>
+        <td><a class="link-light" href="call_detail.html?job_id=${row.job_id}">詳情</a></td>
       `;
       tbody.appendChild(tr);
     });
