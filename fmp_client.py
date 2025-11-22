@@ -75,7 +75,12 @@ def _historical_prices(symbol: str, start: datetime, end: datetime) -> List[dict
         except httpx.HTTPStatusError:
             # If data not yet available or 404, return empty
             return []
-    hist = data.get("historical") or []
+    if isinstance(data, dict):
+        hist = data.get("historical") or []
+    elif isinstance(data, list):
+        hist = data
+    else:
+        hist = []
     # FMP returns descending by date; ensure sorted ascending
     hist_sorted = sorted(hist, key=lambda x: x.get("date", ""))
     return hist_sorted
