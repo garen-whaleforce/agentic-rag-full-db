@@ -59,18 +59,22 @@ def _historical_prices(symbol: str, start: datetime, end: datetime) -> List[dict
     """
     _require_api_key()
     with _get_client() as client:
-        # FMP stable endpoint expects symbol in path
-        resp = _get(
-            client,
-            f"historical-price-full/{symbol}",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "apikey": FMP_API_KEY,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json() or {}
+        try:
+            # FMP stable endpoint expects symbol in path
+            resp = _get(
+                client,
+                f"historical-price-full/{symbol}",
+                params={
+                    "from": start.strftime("%Y-%m-%d"),
+                    "to": end.strftime("%Y-%m-%d"),
+                    "apikey": FMP_API_KEY,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+        except httpx.HTTPStatusError:
+            # If data not yet available or 404, return empty
+            return []
     hist = data.get("historical") or []
     # FMP returns descending by date; ensure sorted ascending
     hist_sorted = sorted(hist, key=lambda x: x.get("date", ""))
@@ -93,6 +97,10 @@ def compute_post_return(symbol: str, call_date: str, days: int = 3) -> Dict[str,
             call_dt = datetime.strptime(call_date, "%Y-%m-%d")
         except Exception:
             return {"return": None}
+
+    # if call date is in the future, skip price calc
+    if call_dt > datetime.utcnow():
+        return {"return": None}
 
     start = call_dt + timedelta(days=0)
     end = call_dt + timedelta(days=days + 2)  # buffer to catch weekends/holidays
