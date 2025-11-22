@@ -29,6 +29,9 @@ def run_agentic_rag(context: Dict) -> Dict:
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Agentic RAG pipeline failure: {exc}") from exc
 
+    if not isinstance(result, dict):
+        result = {"raw_output": result}
+
     metadata = result.setdefault("metadata", {})
     metadata.setdefault("generated_at", datetime.utcnow().isoformat() + "Z")
     metadata.setdefault("engine", "EarningsCallAgenticRag")
@@ -45,6 +48,8 @@ def analyze_earnings(symbol: str, year: int, quarter: int) -> Dict:
     job_id = str(uuid4())
     context = get_earnings_context(symbol, year, quarter)
     agentic_result = run_agentic_rag(context)
+    if not isinstance(agentic_result, dict):
+        agentic_result = {"raw_output": agentic_result}
 
     # Persist summary for listing/detail pages
     try:
