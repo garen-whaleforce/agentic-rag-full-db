@@ -60,11 +60,11 @@ def _historical_prices(symbol: str, start: datetime, end: datetime) -> List[dict
     _require_api_key()
     with _get_client() as client:
         try:
-            # FMP stable endpoint expects symbol in path
             resp = _get(
                 client,
-                f"historical-price-full/{symbol}",
+                "historical-price-eod/full",
                 params={
+                    "symbol": symbol,
                     "from": start.strftime("%Y-%m-%d"),
                     "to": end.strftime("%Y-%m-%d"),
                     "apikey": FMP_API_KEY,
