@@ -9,6 +9,9 @@ __pycache__/
 # External research repo (keep as local dependency, not tracked here)
 /EarningsCallAgenticRag/
 
+# Local data (SQLite, caches)
+/data/
+
 # Python build
 *.pyc
 *.pyo

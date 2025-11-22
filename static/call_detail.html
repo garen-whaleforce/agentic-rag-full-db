@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Earnings Call 詳情</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <p class="eyebrow">Agentic RAG · Call Detail</p>
+        <h1 id="title">載入中...</h1>
+        <p class="muted small"><a href="calls.html">← 回列表</a></p>
+      </header>
+
+      <section class="panel grid">
+        <div class="card">
+          <h3>基本資訊</h3>
+          <div class="meta" id="meta-basic"></div>
+        </div>
+        <div class="card">
+          <h3>模型預測</h3>
+          <div class="meta" id="meta-pred"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Main Agent 總結</h3>
+        <div id="main-summary" class="agentic"></div>
+      </section>
+
+      <section class="panel grid">
+        <div class="card">
+          <h3>Comparative Agent</h3>
+          <pre id="cmp" class="debug-block"></pre>
+        </div>
+        <div class="card">
+          <h3>Historical Earnings</h3>
+          <pre id="hist" class="debug-block"></pre>
+        </div>
+        <div class="card">
+          <h3>Historical Performance</h3>
+          <pre id="perf" class="debug-block"></pre>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <div class="card">
+          <h3>Baseline / Sentiment</h3>
+          <pre id="baseline" class="debug-block"></pre>
+        </div>
+        <div class="card">
+          <h3>Token & 成本</h3>
+          <pre id="tokens" class="debug-block"></pre>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Raw JSON</h3>
+        <pre id="raw-json" class="debug-block"></pre>
+      </section>
+    </div>
+    <script src="call_detail.js"></script>
+  </body>
+</html>

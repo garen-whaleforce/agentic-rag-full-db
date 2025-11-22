@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from analysis_engine import analyze_earnings
 from fmp_client import get_transcript_dates, search_symbols
+from storage import get_call, list_calls, init_db
 
 load_dotenv()
 
@@ -61,6 +62,50 @@ def api_analyze(payload: AnalyzeRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/calls")
+def api_calls(
+    symbol: str | None = Query(None),
+    sector: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    ret_min: float | None = Query(None),
+    ret_max: float | None = Query(None),
+    prediction: str | None = Query(None),
+    correct: bool | None = Query(None),
+    sort: str = Query("date_desc"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    try:
+        rows = list_calls(
+            symbol=symbol,
+            sector=sector,
+            date_from=date_from,
+            date_to=date_to,
+            ret_min=ret_min,
+            ret_max=ret_max,
+            prediction=prediction,
+            correct=correct,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        return rows
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/call/{job_id}")
+def api_call_detail(job_id: str):
+    try:
+        row = get_call(job_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not row:
+        raise HTTPException(status_code=404, detail="call not found")
+    return row
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

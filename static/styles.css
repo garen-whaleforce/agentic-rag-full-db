@@ -186,6 +186,33 @@ button:not(:disabled):active {
   margin-bottom: 2px;
 }
 
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 8px;
+  text-align: left;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.secondary {
+  background: #0f172a;
+  border: 1px solid var(--border);
+}
+
 .agentic h4 {
   margin: 8px 0 4px;
 }
