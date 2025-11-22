@@ -82,6 +82,15 @@ h2 {
   color: var(--muted);
 }
 
+.link-light {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.link-light:hover {
+  text-decoration: underline;
+}
+
 .small {
   font-size: 13px;
 }
