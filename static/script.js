@@ -12,6 +12,7 @@ const datesHint = document.getElementById("dates-hint");
 const analyzeBtn = document.getElementById("analyze-btn");
 const metaSymbol = document.getElementById("meta-symbol");
 const metaFiscal = document.getElementById("meta-fiscal");
+const metaCalendar = document.getElementById("meta-calendar");
 const metaDate = document.getElementById("meta-date");
 const agenticContent = document.getElementById("agentic-content");
 const debugJson = document.getElementById("debug-json");
@@ -83,6 +84,7 @@ function onSelectSymbol(item) {
   selectedSymbolEl.textContent = `已選擇：${item.symbol} — ${selectedCompany}`;
   metaSymbol.textContent = item.symbol;
   metaFiscal.textContent = "-";
+  metaCalendar.textContent = "-";
   metaDate.textContent = "-";
   agenticContent.innerHTML = '<p class="muted">尚未執行分析。</p>';
   debugJson.textContent = "{}";
@@ -114,7 +116,11 @@ async function fetchTranscriptDates(symbol) {
       const opt = document.createElement("option");
       opt.value = `${d.year}|${d.quarter}`;
       const labelDate = d.date ? ` · ${d.date}` : "";
-      opt.textContent = `FY${d.year} Q${d.quarter}${labelDate}`;
+      const cal =
+        d.calendar_year && d.calendar_quarter
+          ? ` · CY${d.calendar_year} Q${d.calendar_quarter}`
+          : "";
+      opt.textContent = `FY${d.year} Q${d.quarter}${cal}${labelDate}`;
       datesSelect.appendChild(opt);
     });
     datesHint.textContent = `共 ${availableDates.length} 筆季度資料。`;
@@ -194,6 +200,11 @@ async function runAnalysis() {
     const data = await res.json();
     metaSymbol.textContent = data.symbol || selectedSymbol;
     metaFiscal.textContent = `FY${data.year} Q${data.quarter}`;
+    if (data.calendar_year && data.calendar_quarter) {
+      metaCalendar.textContent = `CY${data.calendar_year} Q${data.calendar_quarter}`;
+    } else {
+      metaCalendar.textContent = "-";
+    }
     metaDate.textContent = data.transcript_date || "-";
     renderAgentic(data.agentic_result);
     debugJson.textContent = JSON.stringify(data, null, 2);

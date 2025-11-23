@@ -187,6 +187,14 @@ def get_transcript_dates(symbol: str) -> List[Dict]:
     Call FMP Transcripts Dates By Symbol API:
     GET /stable/earning-call-transcript-dates?symbol={symbol}&apikey=FMP_API_KEY
     """
+    def _calendar_from_date(date_str: str) -> Dict[str, int | None]:
+        try:
+            dt = datetime.fromisoformat(date_str[:10])
+            quarter = (dt.month - 1) // 3 + 1
+            return {"calendar_year": dt.year, "calendar_quarter": quarter}
+        except Exception:
+            return {"calendar_year": None, "calendar_quarter": None}
+
     if not symbol:
         return []
 
@@ -201,7 +209,16 @@ def get_transcript_dates(symbol: str) -> List[Dict]:
         year = item.get("fiscalYear") or item.get("year")
         quarter = item.get("fiscalQuarter") or item.get("quarter")
         date = item.get("date") or item.get("reportDate")
-        normalized.append({"year": year, "quarter": quarter, "date": date})
+        cal = _calendar_from_date(date) if date else {"calendar_year": None, "calendar_quarter": None}
+        normalized.append(
+            {
+                "year": year,
+                "quarter": quarter,
+                "date": date,
+                "calendar_year": cal["calendar_year"],
+                "calendar_quarter": cal["calendar_quarter"],
+            }
+        )
     return normalized
 
 
@@ -267,6 +284,16 @@ def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
     post_earnings = compute_post_return(symbol, transcript.get("date") or "", days=3)
     post_earnings_return = post_earnings.get("return")
 
+    calendar_year = None
+    calendar_quarter = None
+    if transcript.get("date"):
+        try:
+            dt = datetime.fromisoformat(transcript["date"][:10])
+            calendar_year = dt.year
+            calendar_quarter = (dt.month - 1) // 3 + 1
+        except Exception:
+            pass
+
     return {
         "symbol": symbol,
         "year": year,
@@ -276,6 +303,8 @@ def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
         "exchange": profile.get("exchange"),
         "transcript_text": transcript.get("content", ""),
         "transcript_date": transcript.get("date"),
+        "calendar_year": calendar_year,
+        "calendar_quarter": calendar_quarter,
         "financials": financials,
         "price_window": price_window,
         "post_earnings_return": post_earnings_return,
