@@ -65,6 +65,61 @@
         </div>
       </section>
 
+      <section class="panel card-full">
+        <h3>總覽 KPI</h3>
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="label">Prediction</span>
+            <div id="kpi-pred" class="kpi-value">-</div>
+          </div>
+          <div class="kpi-card">
+            <span class="label">Confidence</span>
+            <div id="kpi-conf" class="kpi-value">-</div>
+          </div>
+          <div class="kpi-card">
+            <span class="label">Post Return (3D)</span>
+            <div id="kpi-return" class="kpi-value">-</div>
+          </div>
+          <div class="kpi-card">
+            <span class="label">Token / Cost</span>
+            <div id="kpi-cost" class="kpi-value small">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel card-full detail-grid">
+        <div class="detail-card">
+          <div class="detail-header">
+            <h3>Comparative Agent</h3>
+          </div>
+          <div id="detail-cmp" class="detail-body muted">尚無資料</div>
+        </div>
+        <div class="detail-card">
+          <div class="detail-header">
+            <h3>Historical Earnings</h3>
+          </div>
+          <div id="detail-hist" class="detail-body muted">尚無資料</div>
+        </div>
+        <div class="detail-card">
+          <div class="detail-header">
+            <h3>Historical Performance</h3>
+          </div>
+          <div id="detail-perf" class="detail-body muted">尚無資料</div>
+        </div>
+        <div class="detail-card">
+          <div class="detail-header">
+            <h3>Baseline / Sentiment</h3>
+          </div>
+          <div id="detail-baseline" class="detail-body muted">預留</div>
+        </div>
+        <div class="detail-card">
+          <div class="detail-header">
+            <h3>Token & 成本</h3>
+          </div>
+          <div id="detail-tokens" class="detail-body muted">-</div>
+        </div>
+      </section>
+
       <section class="panel collapsible">
         <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="debug-json">
           <span>除錯用 JSON</span>

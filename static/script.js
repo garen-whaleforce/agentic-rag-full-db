@@ -16,6 +16,15 @@ const metaCalendar = document.getElementById("meta-calendar");
 const metaDate = document.getElementById("meta-date");
 const agenticContent = document.getElementById("agentic-content");
 const debugJson = document.getElementById("debug-json");
+const kpiPred = document.getElementById("kpi-pred");
+const kpiConf = document.getElementById("kpi-conf");
+const kpiReturn = document.getElementById("kpi-return");
+const kpiCost = document.getElementById("kpi-cost");
+const detailCmp = document.getElementById("detail-cmp");
+const detailHist = document.getElementById("detail-hist");
+const detailPerf = document.getElementById("detail-perf");
+const detailBaseline = document.getElementById("detail-baseline");
+const detailTokens = document.getElementById("detail-tokens");
 
 function setStatus(message, tone = "muted") {
   statusEl.textContent = message;
@@ -271,6 +280,36 @@ async function runAnalysis() {
     metaDate.textContent = data.transcript_date || "-";
     renderAgentic(data.agentic_result);
     debugJson.textContent = JSON.stringify(data, null, 2);
+
+    // KPI + 詳細資訊
+    const agent = data.agentic_result || {};
+    const rawNotes = (agent.raw && agent.raw.notes) || {};
+    const tokenUsage = data.token_usage || agent.raw?.token_usage || {};
+    const postReturn = data.post_return_meta?.return ?? data.post_earnings_return;
+
+    kpiPred.textContent = agent.prediction || "N/A";
+    kpiConf.textContent =
+      agent.confidence != null ? `${Math.round((agent.confidence || 0) * 100)}%` : "-";
+    kpiReturn.textContent =
+      postReturn != null ? `${(postReturn * 100).toFixed(2)}%` : "未計算";
+    const cost = tokenUsage.cost_usd != null ? `$${tokenUsage.cost_usd.toFixed(4)}` : "N/A";
+    const tok = tokenUsage.total_tokens != null ? ` · Tokens ${tokenUsage.total_tokens}` : "";
+    kpiCost.textContent = `${cost}${tok}`;
+
+    const clean = (val) => {
+      if (!val) return null;
+      const s = String(val).trim();
+      return ["n/a", "na", "none"].includes(s.toLowerCase()) ? null : s;
+    };
+    detailCmp.textContent = clean(rawNotes.peers) || "尚未產生（可能缺少 Neo4j 資料）";
+    detailHist.textContent = clean(rawNotes.past) || "尚未產生（可能缺少 Neo4j 資料）";
+    detailPerf.textContent = clean(rawNotes.financials) || "尚未產生（可能缺少 Neo4j 資料）";
+    detailBaseline.textContent = "Baseline / Sentiment 預留";
+    const tokensToShow =
+      tokenUsage.cost_usd != null ? { cost_usd: tokenUsage.cost_usd, ...tokenUsage } : tokenUsage;
+    detailTokens.textContent = Object.keys(tokensToShow || {}).length
+      ? JSON.stringify(tokensToShow, null, 2)
+      : "N/A";
     setStatus("分析完成");
   } catch (err) {
     console.error(err);
