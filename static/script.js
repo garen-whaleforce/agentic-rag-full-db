@@ -22,6 +22,20 @@ function setStatus(message, tone = "muted") {
   statusEl.style.color = tone === "error" ? "#f87171" : "#9ca3af";
 }
 
+async function fetchDatesForSymbol(symbol) {
+  try {
+    const res = await fetch(`/api/transcript-dates?symbol=${encodeURIComponent(symbol)}`);
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    return (data || []).filter((d) => Number.isInteger(d.year) && Number.isInteger(d.quarter));
+  } catch (err) {
+    console.error("load dates failed for", symbol, err);
+    return [];
+  }
+}
+
 function renderResults(items) {
   resultsEl.innerHTML = "";
   if (!items || items.length === 0) {
@@ -40,7 +54,8 @@ function renderResults(items) {
     title.textContent = `${item.symbol} - ${item.name || "Unnamed"}`;
     const meta = document.createElement("div");
     meta.className = "muted small";
-    meta.textContent = `${item.exchange || "N/A"} - ${item.currency || ""}`;
+    const avail = item.dates ? ` · ${item.dates.length} 筆季度` : "";
+    meta.textContent = `${item.exchange || "N/A"} - ${item.currency || ""}${avail}`;
 
     info.appendChild(title);
     info.appendChild(meta);
@@ -70,8 +85,17 @@ async function searchSymbols() {
       throw new Error(await res.text());
     }
     const data = await res.json();
-    renderResults(data);
-    setStatus(`找到 ${data.length} 筆結果`);
+
+    // 只保留有季度資料的公司
+    const enriched = await Promise.all(
+      data.map(async (item) => {
+        const dates = await fetchDatesForSymbol(item.symbol);
+        return { ...item, dates };
+      })
+    );
+    const filtered = enriched.filter((x) => x.dates && x.dates.length > 0);
+    renderResults(filtered);
+    setStatus(`找到 ${filtered.length} 筆有季度資料的結果`);
   } catch (err) {
     console.error(err);
     setStatus(`搜尋失敗：${err.message}`, "error");
@@ -88,7 +112,15 @@ function onSelectSymbol(item) {
   metaDate.textContent = "-";
   agenticContent.innerHTML = '<p class="muted">尚未執行分析。</p>';
   debugJson.textContent = "{}";
-  fetchTranscriptDates(item.symbol);
+  // 直接用已載入的季度資料，若沒有再補拉
+  if (item.dates && item.dates.length) {
+    availableDates = item.dates;
+    populateDatesSelect();
+  } else {
+    fetchTranscriptDates(item.symbol);
+  }
+  // 收起其他結果
+  resultsEl.innerHTML = "";
 }
 
 async function fetchTranscriptDates(symbol) {
@@ -96,14 +128,7 @@ async function fetchTranscriptDates(symbol) {
   analyzeBtn.disabled = true;
   datesHint.textContent = "";
   try {
-    const res = await fetch(`/api/transcript-dates?symbol=${encodeURIComponent(symbol)}`);
-    if (!res.ok) {
-      throw new Error(await res.text());
-    }
-    const data = await res.json();
-    availableDates = (data || []).filter(
-      (d) => Number.isInteger(d.year) && Number.isInteger(d.quarter)
-    );
+    availableDates = await fetchDatesForSymbol(symbol);
 
     if (availableDates.length === 0) {
       datesSelect.innerHTML = '<option value="">沒有可用的季度</option>';
@@ -111,26 +136,30 @@ async function fetchTranscriptDates(symbol) {
       return;
     }
 
-    datesSelect.innerHTML = "";
-    availableDates.forEach((d) => {
-      const opt = document.createElement("option");
-      opt.value = `${d.year}|${d.quarter}`;
-      const labelDate = d.date ? ` · ${d.date}` : "";
-      const cal =
-        d.calendar_year && d.calendar_quarter
-          ? ` · CY${d.calendar_year} Q${d.calendar_quarter}`
-          : "";
-      opt.textContent = `FY${d.year} Q${d.quarter}${cal}${labelDate}`;
-      datesSelect.appendChild(opt);
-    });
-    datesHint.textContent = `共 ${availableDates.length} 筆季度資料。`;
-    analyzeBtn.disabled = false;
+    populateDatesSelect();
   } catch (err) {
     console.error(err);
     datesHint.textContent = "";
     datesSelect.innerHTML = '<option value="">載入失敗</option>';
     setStatus(`載入季度失敗：${err.message}`, "error");
   }
+}
+
+function populateDatesSelect() {
+  datesSelect.innerHTML = "";
+  availableDates.forEach((d) => {
+    const opt = document.createElement("option");
+    opt.value = `${d.year}|${d.quarter}`;
+    const labelDate = d.date ? ` · ${d.date}` : "";
+    const cal =
+      d.calendar_year && d.calendar_quarter
+        ? ` · CY${d.calendar_year} Q${d.calendar_quarter}`
+        : "";
+    opt.textContent = `FY${d.year} Q${d.quarter}${cal}${labelDate}`;
+    datesSelect.appendChild(opt);
+  });
+  datesHint.textContent = `共 ${availableDates.length} 筆季度資料。`;
+  analyzeBtn.disabled = false;
 }
 
 function renderAgentic(result) {
