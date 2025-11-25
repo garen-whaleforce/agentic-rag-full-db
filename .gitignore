@@ -6,9 +6,6 @@ __pycache__/
 .idea/
 .vscode/
 
-# External research repo (keep as local dependency, not tracked here)
-/EarningsCallAgenticRag/
-
 # Local data (SQLite, caches)
 /data/
 
@@ -19,3 +16,12 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Vendorized research repo: keep code tracked, ignore bulky/sensitive artifacts
+EarningsCallAgenticRag/credentials.json
+EarningsCallAgenticRag/Results/
+EarningsCallAgenticRag/financial_statements*
+EarningsCallAgenticRag/maec_transcripts*.csv*
+EarningsCallAgenticRag/merged_data*.csv*
+EarningsCallAgenticRag/*.zip
+EarningsCallAgenticRag/neo4j.lock
