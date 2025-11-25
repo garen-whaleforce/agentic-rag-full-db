@@ -2,6 +2,7 @@ import os
 import time
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+import logging
 
 import httpx
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ load_dotenv()
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 FMP_BASE_URL = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable").rstrip("/")
 _CLIENT: Optional[httpx.Client] = None
+logger = logging.getLogger(__name__)
 
 
 def _require_api_key() -> str:
@@ -64,6 +66,7 @@ def _get(client: httpx.Client, path: str, params: dict) -> httpx.Response:
                 continue
             raise
     if last_exc:
+        logger.error("HTTP request failed after retries: %s %s", path, last_exc)
         raise last_exc
     raise RuntimeError("Unexpected HTTP error without exception")
 

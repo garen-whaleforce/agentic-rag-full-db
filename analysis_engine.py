@@ -30,7 +30,7 @@ def run_agentic_rag(context: Dict) -> Dict:
         history_quarters = 4
 
     try:
-        ingest_recent_history_into_neo4j(context, max_quarters=history_quarters)
+        _retry(lambda: ingest_recent_history_into_neo4j(context, max_quarters=history_quarters))
     except Neo4jIngestError as exc:
         _add_ingest_warning(f"Historical ingest failed: {exc}")
     except Exception as exc:  # noqa: BLE001
@@ -38,7 +38,7 @@ def run_agentic_rag(context: Dict) -> Dict:
 
     # On-the-fly Neo4j ingestion so helper agents have facts to use.
     try:
-        ingest_context_into_neo4j(context)
+        _retry(lambda: ingest_context_into_neo4j(context))
     except Neo4jIngestError as exc:
         # Keep analyzing even if ingestion failed; surface a hint in metadata.
         context.setdefault("ingest_warning", str(exc))
@@ -145,3 +145,17 @@ def analyze_earnings(symbol: str, year: int, quarter: int) -> Dict:
 
     return payload
 logger = logging.getLogger(__name__)
+
+# Simple retry helper for Neo4j ingest
+def _retry(func, attempts: int = 3, delay: float = 1.0):
+    import time
+
+    last_exc = None
+    for _ in range(attempts):
+        try:
+            return func()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            time.sleep(delay)
+    if last_exc:
+        raise last_exc

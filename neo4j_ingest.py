@@ -5,6 +5,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import logging
 
 
 class Neo4jIngestError(RuntimeError):
@@ -12,6 +13,7 @@ class Neo4jIngestError(RuntimeError):
 
 
 REPO_NAME = "EarningsCallAgenticRag"
+logger = logging.getLogger(__name__)
 
 
 def _resolve_repo_path() -> Path:
@@ -179,7 +181,7 @@ def ingest_recent_history_into_neo4j(context: Dict[str, Any], max_quarters: int 
                 triples = idx._to_triples(facts, symbol, q_label)
                 idx._push(triples)
             except Exception as exc:  # noqa: BLE001
-                print(f"[AGENT LOG] 略過歷史匯入 {symbol} {q_label}：{exc}")
+                logger.warning("略過歷史匯入 %s %s：%s", symbol, q_label, exc)
                 continue
     finally:
         try:

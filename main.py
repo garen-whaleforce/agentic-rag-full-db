@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from analysis_engine import analyze_earnings
 from fmp_client import close_fmp_client, get_transcript_dates, search_symbols, _require_api_key
-from storage import get_call, list_calls, init_db
+from storage import get_call, list_calls, init_db, ensure_db_writable
 
 load_dotenv()
 
@@ -39,6 +39,8 @@ def _shutdown_clients():
 def _startup_checks():
     # Fail fast if required config is missing
     _require_api_key()
+    # Ensure DB path exists/writable
+    ensure_db_writable()
 
 
 class AnalyzeRequest(BaseModel):

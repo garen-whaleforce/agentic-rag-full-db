@@ -5,9 +5,11 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import logging
 
 DB_PATH = Path(os.getenv("ANALYSIS_DB_PATH", "data/analysis_results.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -70,6 +72,19 @@ def init_db() -> None:
             )
             """
         )
+
+
+def ensure_db_writable() -> None:
+    """
+    Ensure the DB directory exists and is writable; raise if not.
+    """
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # touch file to verify write
+        DB_PATH.touch(exist_ok=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("DB path not writable: %s", exc)
+        raise
 
 
 def record_analysis(
