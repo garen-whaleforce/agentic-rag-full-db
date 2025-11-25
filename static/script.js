@@ -184,7 +184,7 @@ function renderAgentic(result) {
     return;
   }
   const { prediction, confidence, summary, reasons, next_steps, metadata } = result;
-  const engineLabel = (metadata && metadata.engine) || "Agentic RAG";
+  const engineLabel = "";
   const tokenUsage = (result.raw && result.raw.token_usage) || metadata?.token_usage || {};
   const reasonsMarkup =
     reasons && reasons.length
