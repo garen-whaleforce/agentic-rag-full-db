@@ -27,6 +27,7 @@ from agents.prompts.prompts import (
     facts_extraction_prompt,  # chunk‑level extraction
     facts_delegation_prompt,  # routing to helper agents
     main_agent_prompt,        # fact‑level verdict
+    peer_discovery_ticker_prompt,  # peer lookup
     # Add import for formatting QoQ facts
 )
 
@@ -326,13 +327,24 @@ class MainAgent:
         # ------------------------------------------------------------------
         # 1) Peer discovery (best-effort, safe-fallback)
         # ------------------------------------------------------------------
+        peers: List[str] = []
         try:
             peers_resp = self._chat(
-                f"Give 3 peer tickers for {row['ticker']} as a JSON list of strings."
+                peer_discovery_ticker_prompt.format(ticker=row["ticker"])
             )
-            peers = json.loads(peers_resp)
-            if not isinstance(peers, list):
+            parsed = json.loads(peers_resp)
+            if isinstance(parsed, list):
+                seen = set()
                 peers = []
+                for p in parsed:
+                    if not p:
+                        continue
+                    sym = str(p).upper()
+                    if sym not in seen:
+                        seen.add(sym)
+                        peers.append(sym)
+                    if len(peers) >= 5:
+                        break
         except Exception:
             peers = []
     
