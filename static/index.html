@@ -95,36 +95,56 @@
         </div>
       </section>
 
-      <section class="panel card-full detail-grid">
+      <section class="panel card-full detail-list">
         <div class="detail-card">
-          <div class="detail-header">
-            <h3>Comparative Agent</h3>
-          </div>
-          <div id="detail-cmp" class="detail-body muted">尚無資料</div>
+          <button class="detail-toggle" type="button" aria-expanded="false" data-target="detail-cmp">
+            <div>
+              <h3>Comparative Agent</h3>
+              <p id="detail-cmp-summary" class="muted small">尚無資料</p>
+            </div>
+            <span class="chevron">▼</span>
+          </button>
+          <div id="detail-cmp" class="detail-body" hidden>尚無資料</div>
         </div>
         <div class="detail-card">
-          <div class="detail-header">
-            <h3>Historical Earnings</h3>
-          </div>
-          <div id="detail-hist" class="detail-body muted">尚無資料</div>
+          <button class="detail-toggle" type="button" aria-expanded="false" data-target="detail-hist">
+            <div>
+              <h3>Historical Earnings</h3>
+              <p id="detail-hist-summary" class="muted small">尚無資料</p>
+            </div>
+            <span class="chevron">▼</span>
+          </button>
+          <div id="detail-hist" class="detail-body" hidden>尚無資料</div>
         </div>
         <div class="detail-card">
-          <div class="detail-header">
-            <h3>Historical Performance</h3>
-          </div>
-          <div id="detail-perf" class="detail-body muted">尚無資料</div>
+          <button class="detail-toggle" type="button" aria-expanded="false" data-target="detail-perf">
+            <div>
+              <h3>Historical Performance</h3>
+              <p id="detail-perf-summary" class="muted small">尚無資料</p>
+            </div>
+            <span class="chevron">▼</span>
+          </button>
+          <div id="detail-perf" class="detail-body" hidden>尚無資料</div>
         </div>
         <div class="detail-card">
-          <div class="detail-header">
-            <h3>Baseline / Sentiment</h3>
-          </div>
-          <div id="detail-baseline" class="detail-body muted">預留</div>
+          <button class="detail-toggle" type="button" aria-expanded="false" data-target="detail-baseline">
+            <div>
+              <h3>Baseline / Sentiment</h3>
+              <p id="detail-baseline-summary" class="muted small">預留</p>
+            </div>
+            <span class="chevron">▼</span>
+          </button>
+          <div id="detail-baseline" class="detail-body" hidden>預留</div>
         </div>
         <div class="detail-card">
-          <div class="detail-header">
-            <h3>Token & 成本</h3>
-          </div>
-          <div id="detail-tokens" class="detail-body muted">-</div>
+          <button class="detail-toggle" type="button" aria-expanded="false" data-target="detail-tokens">
+            <div>
+              <h3>Token & 成本</h3>
+              <p id="detail-tokens-summary" class="muted small">-</p>
+            </div>
+            <span class="chevron">▼</span>
+          </button>
+          <div id="detail-tokens" class="detail-body" hidden>-</div>
         </div>
       </section>
 

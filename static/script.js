@@ -27,6 +27,11 @@ const detailHist = document.getElementById("detail-hist");
 const detailPerf = document.getElementById("detail-perf");
 const detailBaseline = document.getElementById("detail-baseline");
 const detailTokens = document.getElementById("detail-tokens");
+const detailCmpSummary = document.getElementById("detail-cmp-summary");
+const detailHistSummary = document.getElementById("detail-hist-summary");
+const detailPerfSummary = document.getElementById("detail-perf-summary");
+const detailBaselineSummary = document.getElementById("detail-baseline-summary");
+const detailTokensSummary = document.getElementById("detail-tokens-summary");
 
 function setStatus(message, tone = "muted") {
   statusEl.textContent = message;
@@ -164,9 +169,9 @@ function populateDatesSelect() {
     const labelDate = d.date ? ` · ${d.date}` : "";
     const cal =
       d.calendar_year && d.calendar_quarter
-        ? ` · CY${d.calendar_year} Q${d.calendar_quarter}`
-        : "";
-    opt.textContent = `FY${d.year} Q${d.quarter}${cal}${labelDate}`;
+        ? `CY${d.calendar_year} Q${d.calendar_quarter}`
+        : `CY?`;
+    opt.textContent = `${cal}${labelDate ? " · " + labelDate : ""}`;
     datesSelect.appendChild(opt);
   });
   datesHint.textContent = `共 ${availableDates.length} 筆季度資料。`;
@@ -314,6 +319,18 @@ async function runAnalysis() {
     detailTokens.textContent = Object.keys(tokensToShow || {}).length
       ? JSON.stringify(tokensToShow, null, 2)
       : "N/A";
+
+    const summarize = (txt) => {
+      if (!txt) return "尚無資料";
+      const words = String(txt).split(/\s+/);
+      if (words.length <= 12) return txt;
+      return words.slice(0, 12).join(" ") + "...";
+    };
+    detailCmpSummary.textContent = summarize(detailCmp.textContent);
+    detailHistSummary.textContent = summarize(detailHist.textContent);
+    detailPerfSummary.textContent = summarize(detailPerf.textContent);
+    detailBaselineSummary.textContent = summarize(detailBaseline.textContent);
+    detailTokensSummary.textContent = summarize(detailTokens.textContent);
     setStatus("分析完成");
   } catch (err) {
     console.error(err);
@@ -352,5 +369,29 @@ if (debugToggle && debugBody) {
   if (chevron) chevron.style.transform = "rotate(-90deg)";
 }
 
+// Init detail toggles
+wireDetailToggles();
+
 // 初始狀態
 setStatus("輸入公司名稱或代號開始搜尋");
+// Toggle detail sections
+function wireDetailToggles() {
+  document.querySelectorAll(".detail-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-target");
+      const body = document.getElementById(targetId);
+      const expanded = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!expanded));
+      const chevron = btn.querySelector(".chevron");
+      if (body) body.hidden = expanded;
+      if (chevron) chevron.style.transform = expanded ? "rotate(-90deg)" : "rotate(0deg)";
+    });
+    // start collapsed
+    btn.setAttribute("aria-expanded", "false");
+    const chevron = btn.querySelector(".chevron");
+    if (chevron) chevron.style.transform = "rotate(-90deg)";
+    const targetId = btn.getAttribute("data-target");
+    const body = document.getElementById(targetId);
+    if (body) body.hidden = true;
+  });
+}

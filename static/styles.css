@@ -253,12 +253,6 @@ button:not(:disabled):active {
   color: var(--accent);
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-}
-
 .detail-card {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -268,15 +262,43 @@ button:not(:disabled):active {
   flex-direction: column;
 }
 
-.detail-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
 .detail-body {
   padding: 12px 14px 16px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+}
+
+.detail-toggle h3 {
+  margin: 0 0 4px;
+}
+
+.detail-toggle .chevron {
+  transition: transform 0.2s ease;
+}
+
+.detail-toggle[aria-expanded="false"] .chevron {
+  transform: rotate(-90deg);
+}
+
+.detail-body[hidden] {
+  display: none;
 }
 
 .accordion {
