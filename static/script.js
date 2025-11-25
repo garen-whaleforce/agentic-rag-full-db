@@ -365,7 +365,7 @@ async function runAnalysis() {
     kpiPred.textContent = agent.prediction || "N/A";
     kpiConf.textContent =
       agent.confidence != null ? `${Math.round((agent.confidence || 0) * 100)}%` : "-";
-    kpiReturn.textContent = postReturn != null ? `${(postReturn * 100).toFixed(2)}%` : "未計算";
+    kpiReturn.textContent = postReturn != null ? `${(postReturn * 100).toFixed(2)}%` : "N/A";
     const cost = tokenUsage.cost_usd != null ? `$${tokenUsage.cost_usd.toFixed(4)}` : "N/A";
     kpiCost.textContent = `${cost}`;
     kpiReturn.classList.remove("pos", "neg");
@@ -511,7 +511,7 @@ function renderBatch(rows) {
       const pred = agent.prediction || "-";
       const conf = agent.confidence != null ? `${Math.round((agent.confidence || 0) * 100)}%` : "-";
       const post = r.payload ? r.payload.post_earnings_return : null;
-      const postTxt = post != null ? `${(post * 100).toFixed(2)}%` : "-";
+      const postTxt = post != null ? `${(post * 100).toFixed(2)}%` : "N/A";
       const badge = r.status === "ok" ? '<span class="badge">OK</span>' : '<span class="badge" style="background: rgba(220,38,38,0.15); color:#dc2626; border-color: rgba(220,38,38,0.4);">Error</span>';
       return `<div class="row">
         <div>${r.symbol || "-"}</div>
