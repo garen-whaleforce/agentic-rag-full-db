@@ -126,6 +126,8 @@ def analyze_earnings(symbol: str, year: int, quarter: int) -> Dict:
         "transcript_date": context.get("transcript_date"),
         "calendar_year": context.get("calendar_year"),
         "calendar_quarter": context.get("calendar_quarter"),
+        "post_return_meta": context.get("post_return_meta"),
+        "post_earnings_return": context.get("post_earnings_return"),
         "job_id": job_id,
         "agentic_result": agentic_result,
         "context": context,
