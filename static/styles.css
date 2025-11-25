@@ -75,7 +75,13 @@ h1 {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  align-items: start;
+  align-items: stretch;
+}
+
+.steps-grid .panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-header {
