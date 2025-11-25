@@ -9,6 +9,7 @@ load_dotenv()
 
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 FMP_BASE_URL = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable").rstrip("/")
+_CLIENT: Optional[httpx.Client] = None
 
 
 def _require_api_key() -> str:
@@ -18,7 +19,22 @@ def _require_api_key() -> str:
 
 
 def _get_client() -> httpx.Client:
-    return httpx.Client(base_url=FMP_BASE_URL, timeout=15.0)
+    """
+    Lazy singleton httpx client so connections can be pooled across requests.
+    """
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.Client(base_url=FMP_BASE_URL, timeout=15.0)
+    return _CLIENT
+
+
+def close_fmp_client() -> None:
+    global _CLIENT
+    if _CLIENT is not None:
+        try:
+            _CLIENT.close()
+        finally:
+            _CLIENT = None
 
 
 def _get(client: httpx.Client, path: str, params: dict) -> httpx.Response:
@@ -36,11 +52,11 @@ def get_company_profile(symbol: str) -> Dict:
     if not symbol:
         return {}
     _require_api_key()
-    with _get_client() as client:
-        # FMP stable profile expects symbol as query param, not path segment
-        resp = _get(client, "profile", params={"symbol": symbol, "apikey": FMP_API_KEY})
-        resp.raise_for_status()
-        data = resp.json() or []
+    client = _get_client()
+    # FMP stable profile expects symbol as query param, not path segment
+    resp = _get(client, "profile", params={"symbol": symbol, "apikey": FMP_API_KEY})
+    resp.raise_for_status()
+    data = resp.json() or []
     if not data:
         raise ValueError(f"Company profile not found for {symbol}")
 
@@ -65,28 +81,28 @@ def _historical_prices(symbol: str, start: datetime, end: datetime) -> List[dict
         "to": end.strftime("%Y-%m-%d"),
         "apikey": FMP_API_KEY,
     }
-    with _get_client() as client:
+    client = _get_client()
+    try:
+        resp = _get(
+            client,
+            "historical-price-eod/full",
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json() or {}
+    except httpx.HTTPStatusError:
+        # If data not yet available or 404, return empty
+        data = {}
+
+    # fallback: if empty, try without date filters to get recent window then filter locally
+    if (isinstance(data, dict) and not data.get("historical")) or (isinstance(data, list) and not data):
         try:
-            resp = _get(
-                client,
-                "historical-price-eod/full",
-                params=params,
-            )
+            use_server_window = False
+            resp = _get(client, "historical-price-eod/full", params={"symbol": symbol, "apikey": FMP_API_KEY})
             resp.raise_for_status()
             data = resp.json() or {}
-        except httpx.HTTPStatusError:
-            # If data not yet available or 404, return empty
+        except Exception:
             data = {}
-
-        # fallback: if empty, try without date filters to get recent window then filter locally
-        if (isinstance(data, dict) and not data.get("historical")) or (isinstance(data, list) and not data):
-            try:
-                use_server_window = False
-                resp = _get(client, "historical-price-eod/full", params={"symbol": symbol, "apikey": FMP_API_KEY})
-                resp.raise_for_status()
-                data = resp.json() or {}
-            except Exception:
-                data = {}
 
     if isinstance(data, dict):
         hist = data.get("historical") or []
@@ -166,10 +182,10 @@ def search_symbols(query: str) -> List[Dict]:
 
     _require_api_key()
     cleaned = query.strip()
-    with _get_client() as client:
-        resp = _get(client, "search-symbol", params={"query": cleaned, "apikey": FMP_API_KEY})
-        resp.raise_for_status()
-        data = resp.json() or []
+    client = _get_client()
+    resp = _get(client, "search-symbol", params={"query": cleaned, "apikey": FMP_API_KEY})
+    resp.raise_for_status()
+    data = resp.json() or []
 
     results: List[Dict] = []
     for item in data:
@@ -201,10 +217,10 @@ def get_transcript_dates(symbol: str) -> List[Dict]:
         return []
 
     _require_api_key()
-    with _get_client() as client:
-        resp = _get(client, "earning-call-transcript-dates", params={"symbol": symbol, "apikey": FMP_API_KEY})
-        resp.raise_for_status()
-        data = resp.json() or []
+    client = _get_client()
+    resp = _get(client, "earning-call-transcript-dates", params={"symbol": symbol, "apikey": FMP_API_KEY})
+    resp.raise_for_status()
+    data = resp.json() or []
 
     normalized: List[Dict] = []
     for item in data:
@@ -229,14 +245,14 @@ def get_transcript(symbol: str, year: int, quarter: int) -> Dict:
     Call FMP Earnings Transcript API.
     """
     _require_api_key()
-    with _get_client() as client:
-        resp = _get(
-            client,
-            "earning-call-transcript",
-            params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
-        )
-        resp.raise_for_status()
-        data = resp.json() or []
+    client = _get_client()
+    resp = _get(
+        client,
+        "earning-call-transcript",
+        params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
+    )
+    resp.raise_for_status()
+    data = resp.json() or []
 
     if not data:
         raise ValueError(f"No transcript found for {symbol} FY{year} Q{quarter}")
@@ -257,14 +273,14 @@ def get_quarterly_financials(symbol: str, limit: int = 4) -> Dict:
     """
     _require_api_key()
     params = {"symbol": symbol, "period": "quarter", "limit": limit, "apikey": FMP_API_KEY}
-    with _get_client() as client:
-        income = _get(client, "income-statement", params=params)
-        balance = _get(client, "balance-sheet-statement", params=params)
-        cash_flow = _get(client, "cash-flow-statement", params=params)
+    client = _get_client()
+    income = _get(client, "income-statement", params=params)
+    balance = _get(client, "balance-sheet-statement", params=params)
+    cash_flow = _get(client, "cash-flow-statement", params=params)
 
-        income.raise_for_status()
-        balance.raise_for_status()
-        cash_flow.raise_for_status()
+    income.raise_for_status()
+    balance.raise_for_status()
+    cash_flow.raise_for_status()
 
     return {
         "income": income.json() or [],
