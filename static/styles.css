@@ -121,6 +121,13 @@ h2 {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) auto;
   gap: 10px;
+  align-items: center;
+}
+
+.status-text {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 input,

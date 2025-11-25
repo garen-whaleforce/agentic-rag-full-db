@@ -26,18 +26,18 @@
         <section class="panel">
           <div class="panel-header">
             <h2>1. 搜尋公司 / 代號</h2>
-            <div id="status"></div>
           </div>
           <div class="search-row">
             <input id="search-input" type="text" placeholder="例如：AAPL 或 Apple" />
             <button id="search-btn">搜尋</button>
           </div>
+          <div id="status" class="status-text"></div>
           <div id="results" class="results-list"></div>
         </section>
 
         <section class="panel">
           <div class="panel-header">
-            <h2>2. 選擇季度（FY: Fiscal Year；CY: Calendar Year）</h2>
+            <h2>2. 選擇季度</h2>
             <p id="selected-symbol" class="muted">尚未選擇公司</p>
           </div>
           <div class="dates-row">
@@ -54,13 +54,17 @@
         <div class="info-kpi-grid">
           <div>
             <h3>基礎資訊</h3>
-            <div class="meta meta-inline">
-              <div><span class="label">Symbol</span><span id="meta-symbol">-</span></div>
-              <div><span class="label">Fiscal</span><span id="meta-fiscal">-</span></div>
-              <div><span class="label">Calendar</span><span id="meta-calendar">-</span></div>
-              <div><span class="label">Transcript Date</span><span id="meta-date">-</span></div>
-              <div><span class="label">Company</span><span id="meta-company">-</span></div>
-              <div><span class="label">Sector</span><span id="meta-sector">-</span></div>
+            <div class="meta meta-split">
+              <div class="meta-col">
+                <div><span class="label">Symbol</span><span id="meta-symbol">-</span></div>
+                <div><span class="label">Company</span><span id="meta-company">-</span></div>
+                <div><span class="label">Sector</span><span id="meta-sector">-</span></div>
+              </div>
+              <div class="meta-col">
+                <div><span class="label">Fiscal</span><span id="meta-fiscal">-</span></div>
+                <div><span class="label">Calendar</span><span id="meta-calendar">-</span></div>
+                <div><span class="label">Transcript Date</span><span id="meta-date">-</span></div>
+              </div>
             </div>
           </div>
           <div>
