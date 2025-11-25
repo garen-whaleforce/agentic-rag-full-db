@@ -86,7 +86,7 @@ h1 {
 
 .panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
@@ -119,7 +119,7 @@ h2 {
 .search-row,
 .dates-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) auto;
+  grid-template-columns: minmax(260px, 1fr) auto;
   gap: 10px;
 }
 
@@ -303,6 +303,16 @@ button:not(:disabled):active {
 }
 
 .meta {
+  display: grid;
+  gap: 10px;
+}
+
+.meta-split {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.meta-col {
   display: grid;
   gap: 10px;
 }
