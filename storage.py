@@ -1,27 +1,87 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-import logging
+from typing import Any, Dict, List, Optional
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 DB_PATH = Path(os.getenv("ANALYSIS_DB_PATH", "data/analysis_results.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+PG_DSN = os.getenv("POSTGRES_DSN")
+DB_KIND = "postgres" if PG_DSN else "sqlite"
 logger = logging.getLogger(__name__)
 
 
-def _get_conn() -> sqlite3.Connection:
+def _get_conn():
+    if DB_KIND == "postgres":
+        conn = psycopg2.connect(PG_DSN, cursor_factory=RealDictCursor)
+        conn.autocommit = True
+        return conn
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def _prepare_sql(sql: str) -> str:
+    if DB_KIND == "postgres":
+        return sql.replace("?", "%s")
+    return sql
+
+
+def _fetchall(cursor):
+    rows = cursor.fetchall()
+    if DB_KIND == "postgres":
+        return rows
+    return [dict(r) for r in rows]
+
+
+def _fetchone(cursor):
+    row = cursor.fetchone()
+    if DB_KIND == "postgres":
+        return row
+    return dict(row) if row else None
+
+
+def _created_column_def() -> str:
+    if DB_KIND == "postgres":
+        return "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    return "TEXT DEFAULT (datetime('now'))"
+
+
+def _to_utc(dt_value: Any) -> Optional[datetime]:
+    """
+    Normalize datetime/string to UTC-aware datetime for comparisons.
+    """
+    if dt_value is None:
+        return None
+    if isinstance(dt_value, datetime):
+        if dt_value.tzinfo is None:
+            return dt_value.replace(tzinfo=timezone.utc)
+        return dt_value.astimezone(timezone.utc)
+    if isinstance(dt_value, str):
+        try:
+            parsed = datetime.fromisoformat(dt_value)
+        except Exception:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
 def init_db() -> None:
+    created_col = _created_column_def()
+    correct_type = "BOOLEAN" if DB_KIND == "postgres" else "INTEGER"
     with _get_conn() as conn:
-        conn.execute(
-            """
+        cur = conn.cursor()
+        cur.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS call_results (
                 job_id TEXT PRIMARY KEY,
                 symbol TEXT,
@@ -34,41 +94,35 @@ def init_db() -> None:
                 post_return REAL,
                 prediction TEXT,
                 confidence REAL,
-                correct INTEGER,
+                correct {correct_type},
                 agent_result_json TEXT,
                 token_usage_json TEXT,
                 agent_notes TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
+                created_at {created_col}
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_call_date ON call_results(call_date)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_symbol ON call_results(symbol)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_prediction ON call_results(prediction)"
-        )
-        conn.execute(
-            """
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_call_date ON call_results(call_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_symbol ON call_results(symbol)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_prediction ON call_results(prediction)")
+        cur.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS call_cache (
                 symbol TEXT NOT NULL,
                 fiscal_year INTEGER NOT NULL,
                 fiscal_quarter INTEGER NOT NULL,
                 payload_json TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
+                created_at {created_col},
                 PRIMARY KEY (symbol, fiscal_year, fiscal_quarter)
             )
             """
         )
-        conn.execute(
-            """
+        cur.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS fmp_cache (
                 cache_key TEXT PRIMARY KEY,
                 payload_json TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
+                created_at {created_col}
             )
             """
         )
@@ -78,9 +132,11 @@ def ensure_db_writable() -> None:
     """
     Ensure the DB directory exists and is writable; raise if not.
     """
+    if DB_KIND == "postgres":
+        # Managed externally by Postgres.
+        return
     try:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # touch file to verify write
         DB_PATH.touch(exist_ok=True)
     except Exception as exc:  # noqa: BLE001
         logger.error("DB path not writable: %s", exc)
@@ -106,31 +162,75 @@ def record_analysis(
 ) -> None:
     init_db()
     with _get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO call_results (
-                job_id, symbol, company, fiscal_year, fiscal_quarter, call_date, sector, exchange,
-                post_return, prediction, confidence, correct, agent_result_json, token_usage_json, agent_notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                job_id,
-                symbol,
-                company,
-                fiscal_year,
-                fiscal_quarter,
-                call_date,
-                sector,
-                exchange,
-                post_return,
-                prediction,
-                confidence,
-                1 if correct else 0 if correct is not None else None,
-                json.dumps(agent_result or {}),
-                json.dumps(token_usage or {}),
-                agent_notes or "",
-            ),
-        )
+        cur = conn.cursor()
+        if DB_KIND == "postgres":
+            cur.execute(
+                """
+                INSERT INTO call_results (
+                    job_id, symbol, company, fiscal_year, fiscal_quarter, call_date, sector, exchange,
+                    post_return, prediction, confidence, correct, agent_result_json, token_usage_json, agent_notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (job_id) DO UPDATE SET
+                    symbol = EXCLUDED.symbol,
+                    company = EXCLUDED.company,
+                    fiscal_year = EXCLUDED.fiscal_year,
+                    fiscal_quarter = EXCLUDED.fiscal_quarter,
+                    call_date = EXCLUDED.call_date,
+                    sector = EXCLUDED.sector,
+                    exchange = EXCLUDED.exchange,
+                    post_return = EXCLUDED.post_return,
+                    prediction = EXCLUDED.prediction,
+                    confidence = EXCLUDED.confidence,
+                    correct = EXCLUDED.correct,
+                    agent_result_json = EXCLUDED.agent_result_json,
+                    token_usage_json = EXCLUDED.token_usage_json,
+                    agent_notes = EXCLUDED.agent_notes,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    job_id,
+                    symbol,
+                    company,
+                    fiscal_year,
+                    fiscal_quarter,
+                    call_date,
+                    sector,
+                    exchange,
+                    post_return,
+                    prediction,
+                    confidence,
+                    correct,
+                    json.dumps(agent_result or {}),
+                    json.dumps(token_usage or {}),
+                    agent_notes or "",
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO call_results (
+                    job_id, symbol, company, fiscal_year, fiscal_quarter, call_date, sector, exchange,
+                    post_return, prediction, confidence, correct, agent_result_json, token_usage_json, agent_notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    symbol,
+                    company,
+                    fiscal_year,
+                    fiscal_quarter,
+                    call_date,
+                    sector,
+                    exchange,
+                    post_return,
+                    prediction,
+                    confidence,
+                    1 if correct else 0 if correct is not None else None,
+                    json.dumps(agent_result or {}),
+                    json.dumps(token_usage or {}),
+                    agent_notes or "",
+                ),
+            )
 
 
 def list_calls(
@@ -186,14 +286,18 @@ def list_calls(
     params.extend([limit, offset])
 
     with _get_conn() as conn:
-        rows = conn.execute(sql, params).fetchall()
+        cur = conn.cursor()
+        cur.execute(_prepare_sql(sql), params)
+        rows = _fetchall(cur)
     return [dict(r) for r in rows]
 
 
 def get_call(job_id: str) -> Optional[Dict[str, Any]]:
     init_db()
     with _get_conn() as conn:
-        row = conn.execute("SELECT * FROM call_results WHERE job_id = ?", (job_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute(_prepare_sql("SELECT * FROM call_results WHERE job_id = ?"), (job_id,))
+        row = _fetchone(cur)
     if not row:
         return None
     data = dict(row)
@@ -208,21 +312,22 @@ def get_cached_payload(symbol: str, fiscal_year: int, fiscal_quarter: int, max_a
     """
     init_db()
     with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT payload_json, created_at FROM call_cache WHERE symbol=? AND fiscal_year=? AND fiscal_quarter=?",
+        cur = conn.cursor()
+        cur.execute(
+            _prepare_sql(
+                "SELECT payload_json, created_at FROM call_cache WHERE symbol=? AND fiscal_year=? AND fiscal_quarter=?"
+            ),
             (symbol.upper(), fiscal_year, fiscal_quarter),
-        ).fetchone()
+        )
+        row = _fetchone(cur)
     if not row:
         return None
     if max_age_minutes is not None:
-        try:
-            cur = sqlite3.connect(":memory:")
-            cur.execute("SELECT datetime('now','-%d minutes') AS cutoff" % max_age_minutes)
-            cutoff = cur.fetchone()[0]
-            if row["created_at"] < cutoff:
+        created = _to_utc(row.get("created_at"))
+        if created:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+            if created < cutoff:
                 return None
-        except Exception:
-            pass
     try:
         return json.loads(row["payload_json"])
     except Exception:
@@ -235,13 +340,25 @@ def set_cached_payload(symbol: str, fiscal_year: int, fiscal_quarter: int, paylo
     """
     init_db()
     with _get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO call_cache (symbol, fiscal_year, fiscal_quarter, payload_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            (symbol.upper(), fiscal_year, fiscal_quarter, json.dumps(payload or {})),
-        )
+        cur = conn.cursor()
+        if DB_KIND == "postgres":
+            cur.execute(
+                """
+                INSERT INTO call_cache (symbol, fiscal_year, fiscal_quarter, payload_json)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (symbol, fiscal_year, fiscal_quarter)
+                DO UPDATE SET payload_json = EXCLUDED.payload_json, created_at = CURRENT_TIMESTAMP
+                """,
+                (symbol.upper(), fiscal_year, fiscal_quarter, json.dumps(payload or {})),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO call_cache (symbol, fiscal_year, fiscal_quarter, payload_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (symbol.upper(), fiscal_year, fiscal_quarter, json.dumps(payload or {})),
+            )
 
 
 def get_fmp_cache(cache_key: str, max_age_minutes: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -250,21 +367,22 @@ def get_fmp_cache(cache_key: str, max_age_minutes: Optional[int] = None) -> Opti
     """
     init_db()
     with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT payload_json, created_at FROM fmp_cache WHERE cache_key=?",
+        cur = conn.cursor()
+        cur.execute(
+            _prepare_sql(
+                "SELECT payload_json, created_at FROM fmp_cache WHERE cache_key=?"
+            ),
             (cache_key,),
-        ).fetchone()
+        )
+        row = _fetchone(cur)
     if not row:
         return None
     if max_age_minutes is not None:
-        try:
-            cur = sqlite3.connect(":memory:")
-            cur.execute("SELECT datetime('now','-%d minutes') AS cutoff" % max_age_minutes)
-            cutoff = cur.fetchone()[0]
-            if row["created_at"] < cutoff:
+        created = _to_utc(row.get("created_at"))
+        if created:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+            if created < cutoff:
                 return None
-        except Exception:
-            pass
     try:
         return json.loads(row["payload_json"])
     except Exception:
@@ -277,10 +395,22 @@ def set_fmp_cache(cache_key: str, payload: Dict[str, Any]) -> None:
     """
     init_db()
     with _get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO fmp_cache (cache_key, payload_json)
-            VALUES (?, ?)
-            """,
-            (cache_key, json.dumps(payload or {})),
-        )
+        cur = conn.cursor()
+        if DB_KIND == "postgres":
+            cur.execute(
+                """
+                INSERT INTO fmp_cache (cache_key, payload_json)
+                VALUES (%s, %s)
+                ON CONFLICT (cache_key)
+                DO UPDATE SET payload_json = EXCLUDED.payload_json, created_at = CURRENT_TIMESTAMP
+                """,
+                (cache_key, json.dumps(payload or {})),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO fmp_cache (cache_key, payload_json)
+                VALUES (?, ?)
+                """,
+                (cache_key, json.dumps(payload or {})),
+            )

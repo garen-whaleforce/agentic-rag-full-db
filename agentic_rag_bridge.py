@@ -259,3 +259,13 @@ def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
         "reasons": reasons,
         "raw": agent_output,
     }
+
+
+def verify_agentic_repo() -> bool:
+    """
+    Quick healthcheck: ensure external repo & credentials.json exist and are readable.
+    """
+    repo_path = _resolve_repo_path()
+    _ensure_sys_path(repo_path)
+    _credentials_path(repo_path)
+    return True

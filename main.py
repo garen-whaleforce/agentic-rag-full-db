@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field
 from uuid import uuid4
 import asyncio
 
-from analysis_engine import analyze_earnings
-from fmp_client import close_fmp_client, get_transcript_dates, search_symbols, _require_api_key
+from analysis_engine import analyze_earnings, analyze_earnings_async
+from fmp_client import close_fmp_client, close_fmp_async_client, get_transcript_dates, search_symbols, _require_api_key
+from agentic_rag_bridge import verify_agentic_repo
 from storage import get_call, list_calls, init_db, ensure_db_writable
 from typing import Dict
 
@@ -33,9 +34,10 @@ app.add_middleware(
 
 
 @app.on_event("shutdown")
-def _shutdown_clients():
+async def _shutdown_clients():
     # Ensure shared HTTP client is closed on app shutdown
     close_fmp_client()
+    await close_fmp_async_client()
 
 
 @app.on_event("startup")
@@ -44,6 +46,8 @@ def _startup_checks():
     _require_api_key()
     # Ensure DB path exists/writable
     ensure_db_writable()
+    # Ensure external repo/credentials exist
+    verify_agentic_repo()
 
 
 class AnalyzeRequest(BaseModel):
@@ -75,9 +79,9 @@ def api_transcript_dates(symbol: str = Query(..., description="Ticker symbol")) 
 
 
 @app.post("/api/analyze")
-def api_analyze(payload: AnalyzeRequest):
+async def api_analyze(payload: AnalyzeRequest):
     try:
-        result = analyze_earnings(payload.symbol, payload.year, payload.quarter)
+        result = await analyze_earnings_async(payload.symbol, payload.year, payload.quarter)
         return JSONResponse(result)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -110,7 +114,7 @@ async def api_batch_analyze(payload: BatchAnalyzeRequest):
                 latest = sorted(valid, key=lambda x: (int(x["year"]), int(x["quarter"])), reverse=True)[0]
                 year = int(latest["year"])
                 quarter = int(latest["quarter"])
-            res = analyze_earnings(sym, year, quarter) if year and quarter else None
+            res = await analyze_earnings_async(sym, year, quarter) if year and quarter else None
             return {
                 "symbol": sym,
                 "status": "ok",

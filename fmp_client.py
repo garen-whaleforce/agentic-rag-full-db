@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 from typing import Dict, List, Optional
@@ -12,7 +13,9 @@ load_dotenv()
 
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 FMP_BASE_URL = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/stable").rstrip("/")
+FMP_TIMEOUT = float(os.getenv("FMP_TIMEOUT_SECONDS", "8.0"))
 _CLIENT: Optional[httpx.Client] = None
+_ASYNC_CLIENT: Optional[httpx.AsyncClient] = None
 logger = logging.getLogger(__name__)
 
 
@@ -28,8 +31,18 @@ def _get_client() -> httpx.Client:
     """
     global _CLIENT
     if _CLIENT is None:
-        _CLIENT = httpx.Client(base_url=FMP_BASE_URL, timeout=10.0)
+        _CLIENT = httpx.Client(base_url=FMP_BASE_URL, timeout=FMP_TIMEOUT)
     return _CLIENT
+
+
+def _get_async_client() -> httpx.AsyncClient:
+    """
+    Lazy singleton async client for connection pooling in async workflows.
+    """
+    global _ASYNC_CLIENT
+    if _ASYNC_CLIENT is None:
+        _ASYNC_CLIENT = httpx.AsyncClient(base_url=FMP_BASE_URL, timeout=FMP_TIMEOUT)
+    return _ASYNC_CLIENT
 
 
 def close_fmp_client() -> None:
@@ -39,6 +52,15 @@ def close_fmp_client() -> None:
             _CLIENT.close()
         finally:
             _CLIENT = None
+
+
+async def close_fmp_async_client() -> None:
+    global _ASYNC_CLIENT
+    if _ASYNC_CLIENT is not None:
+        try:
+            await _ASYNC_CLIENT.aclose()
+        finally:
+            _ASYNC_CLIENT = None
 
 
 def _get(client: httpx.Client, path: str, params: dict) -> httpx.Response:
@@ -71,6 +93,66 @@ def _get(client: httpx.Client, path: str, params: dict) -> httpx.Response:
     raise RuntimeError("Unexpected HTTP error without exception")
 
 
+async def _aget(client: httpx.AsyncClient, path: str, params: dict) -> httpx.Response:
+    """
+    Async GET with retries/backoff.
+    """
+    clean_path = path.lstrip("/")
+    retry_status = {429, 500, 502, 503}
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = await client.get(clean_path, params=params)
+            resp.raise_for_status()
+            return resp
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            if exc.response.status_code in retry_status and attempt < 2:
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
+            raise
+        except httpx.RequestError as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
+            raise
+    if last_exc:
+        logger.error("HTTP request failed after retries: %s %s", path, last_exc)
+        raise last_exc
+    raise RuntimeError("Unexpected HTTP error without exception")
+
+
+async def _get_company_profile_async(symbol: str) -> Dict:
+    """
+    Async version of company profile fetch.
+    """
+    if not symbol:
+        return {}
+    _require_api_key()
+    cache_ttl = int(os.getenv("PROFILE_CACHE_MIN", "1440"))
+    cache_key = f"fmp:profile:{symbol.upper()}"
+    cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
+    if cached:
+        return cached
+
+    client = _get_async_client()
+    resp = await _aget(client, "profile", params={"symbol": symbol, "apikey": FMP_API_KEY})
+    data = resp.json() or []
+    if not data:
+        raise ValueError(f"Company profile not found for {symbol}")
+
+    first = data[0]
+    out = {
+        "company": first.get("companyName") or first.get("name"),
+        "exchange": first.get("exchangeShortName") or first.get("exchange"),
+        "sector": first.get("sector"),
+        "industry": first.get("industry"),
+    }
+    set_fmp_cache(cache_key, out)
+    return out
+
+
 def get_company_profile(symbol: str) -> Dict:
     """
     Fetch basic company profile (name, exchange, sector) for enrichment.
@@ -93,7 +175,7 @@ def get_company_profile(symbol: str) -> Dict:
         raise ValueError(f"Company profile not found for {symbol}")
 
     first = data[0]
-    return {
+    out = {
         "company": first.get("companyName") or first.get("name"),
         "exchange": first.get("exchangeShortName") or first.get("exchange"),
         "sector": first.get("sector"),
@@ -301,7 +383,41 @@ def get_transcript(symbol: str, year: int, quarter: int) -> Dict:
         raise ValueError(f"No transcript found for {symbol} FY{year} Q{quarter}")
 
     first = data[0]
-    return {
+    out = {
+        "symbol": symbol,
+        "year": year,
+        "quarter": quarter,
+        "date": first.get("date") or first.get("reportDate"),
+        "content": first.get("content") or "",
+    }
+    set_fmp_cache(cache_key, out)
+    return out
+
+
+async def _get_transcript_async(symbol: str, year: int, quarter: int) -> Dict:
+    """
+    Async transcript fetch with cache.
+    """
+    _require_api_key()
+    cache_ttl = int(os.getenv("TRANSCRIPT_CACHE_MIN", "10080"))  # default 7 days
+    cache_key = f"fmp:transcript:{symbol.upper()}:{year}:{quarter}"
+    cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
+    if cached:
+        return cached
+
+    client = _get_async_client()
+    resp = await _aget(
+        client,
+        "earning-call-transcript",
+        params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
+    )
+    data = resp.json() or []
+
+    if not data:
+        raise ValueError(f"No transcript found for {symbol} FY{year} Q{quarter}")
+
+    first = data[0]
+    out = {
         "symbol": symbol,
         "year": year,
         "quarter": quarter,
@@ -333,12 +449,41 @@ def get_quarterly_financials(symbol: str, limit: int = 4) -> Dict:
     balance.raise_for_status()
     cash_flow.raise_for_status()
 
-    return {
+    out = {
         "income": income.json() or [],
         "balance": balance.json() or [],
         "cashFlow": cash_flow.json() or [],
     }
-    # unreachable
+    set_fmp_cache(cache_key, out)
+    return out
+
+
+async def _get_quarterly_financials_async(symbol: str, limit: int = 4) -> Dict:
+    """
+    Async financial statements fetch with cache.
+    """
+    _require_api_key()
+    cache_ttl = int(os.getenv("FIN_CACHE_MIN", "1440"))
+    cache_key = f"fmp:financials:{symbol.upper()}:{limit}"
+    cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
+    if cached:
+        return cached
+
+    params = {"symbol": symbol, "period": "quarter", "limit": limit, "apikey": FMP_API_KEY}
+    client = _get_async_client()
+    income, balance, cash_flow = await asyncio.gather(
+        _aget(client, "income-statement", params=params),
+        _aget(client, "balance-sheet-statement", params=params),
+        _aget(client, "cash-flow-statement", params=params),
+    )
+
+    out = {
+        "income": income.json() or [],
+        "balance": balance.json() or [],
+        "cashFlow": cash_flow.json() or [],
+    }
+    set_fmp_cache(cache_key, out)
+    return out
 
 
 def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
@@ -377,6 +522,48 @@ def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
         "calendar_quarter": calendar_quarter,
         "financials": financials,
         "price_window": price_window,
+        "post_earnings_return": post_earnings_return,
+        "post_return_meta": post_earnings,
+    }
+
+
+async def get_earnings_context_async(symbol: str, year: int, quarter: int) -> Dict:
+    """
+    Async version: fetch profile/transcript/financials in parallel, then compute post-return in a thread.
+    """
+    profile_task = asyncio.create_task(_get_company_profile_async(symbol))
+    transcript_task = asyncio.create_task(_get_transcript_async(symbol, year, quarter))
+    financials_task = asyncio.create_task(_get_quarterly_financials_async(symbol, limit=4))
+
+    profile, transcript, financials = await asyncio.gather(profile_task, transcript_task, financials_task)
+
+    # post-return uses sync httpx client; move to thread
+    post_earnings = await asyncio.to_thread(compute_post_return, symbol, transcript.get("date") or "", 3)
+    post_earnings_return = post_earnings.get("return")
+
+    calendar_year = None
+    calendar_quarter = None
+    if transcript.get("date"):
+        try:
+            dt = datetime.fromisoformat(transcript["date"][:10])
+            calendar_year = dt.year
+            calendar_quarter = (dt.month - 1) // 3 + 1
+        except Exception:
+            pass
+
+    return {
+        "symbol": symbol,
+        "year": year,
+        "quarter": quarter,
+        "company": profile.get("company"),
+        "sector": profile.get("sector"),
+        "exchange": profile.get("exchange"),
+        "transcript_text": transcript.get("content", ""),
+        "transcript_date": transcript.get("date"),
+        "calendar_year": calendar_year,
+        "calendar_quarter": calendar_quarter,
+        "financials": financials,
+        "price_window": [],
         "post_earnings_return": post_earnings_return,
         "post_return_meta": post_earnings,
     }
