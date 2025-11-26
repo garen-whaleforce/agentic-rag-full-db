@@ -282,6 +282,12 @@ def get_transcript(symbol: str, year: int, quarter: int) -> Dict:
     Call FMP Earnings Transcript API.
     """
     _require_api_key()
+    cache_ttl = int(os.getenv("TRANSCRIPT_CACHE_MIN", "10080"))  # default 7 days
+    cache_key = f"fmp:transcript:{symbol.upper()}:{year}:{quarter}"
+    cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
+    if cached:
+        return cached
+
     client = _get_client()
     resp = _get(
         client,
@@ -302,6 +308,8 @@ def get_transcript(symbol: str, year: int, quarter: int) -> Dict:
         "date": first.get("date") or first.get("reportDate"),
         "content": first.get("content") or "",
     }
+    set_fmp_cache(cache_key, out)
+    return out
 
 
 def get_quarterly_financials(symbol: str, limit: int = 4) -> Dict:
@@ -309,6 +317,12 @@ def get_quarterly_financials(symbol: str, limit: int = 4) -> Dict:
     Fetch recent quarterly financial statements.
     """
     _require_api_key()
+    cache_ttl = int(os.getenv("FIN_CACHE_MIN", "1440"))
+    cache_key = f"fmp:financials:{symbol.upper()}:{limit}"
+    cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
+    if cached:
+        return cached
+
     params = {"symbol": symbol, "period": "quarter", "limit": limit, "apikey": FMP_API_KEY}
     client = _get_client()
     income = _get(client, "income-statement", params=params)
