@@ -13,9 +13,6 @@ data/
 *.sqlite
 *.db
 
-# Do not send local external repo; Dockerfile will clone fresh
-EarningsCallAgenticRag/
-
 # OS / editor
 .DS_Store
 .vscode/
