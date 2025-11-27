@@ -67,6 +67,7 @@ class ComparativeAgent:
         model: str = "gpt-4o-mini",
         sector_map: dict = None,
         temperature: float = 0.0,
+        **kwargs,
     ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client = OpenAI(api_key=creds["openai_api_key"])
