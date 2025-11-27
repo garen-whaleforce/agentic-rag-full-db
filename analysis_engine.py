@@ -30,11 +30,11 @@ def run_agentic_rag(
             context["ingest_warning"] = msg
 
     # First, backfill recent historical quarters so helper agents have past facts.
-    history_quarters = 2
+    history_quarters = 4
     try:
-        history_quarters = int(os.getenv("INGEST_HISTORY_QUARTERS", "2"))
+        history_quarters = int(os.getenv("INGEST_HISTORY_QUARTERS", "4"))
     except Exception:
-        history_quarters = 2
+        history_quarters = 4
 
     try:
         _retry(lambda: ingest_recent_history_into_neo4j(context, max_quarters=history_quarters))
