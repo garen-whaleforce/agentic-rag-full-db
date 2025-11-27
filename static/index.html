@@ -42,8 +42,36 @@
             </select>
             <button id="analyze-btn" disabled>分析</button>
           </div>
+          <div class="analysis-actions">
+            <button id="cancel-btn" class="btn-ghost" disabled>停止</button>
+            <p id="analysis-progress" class="muted small"></p>
+          </div>
           <p id="selected-symbol" class="muted info-text">尚未選擇公司</p>
           <p id="dates-hint" class="muted small"></p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>3. 選擇模型</h2>
+          </div>
+          <div class="models-row">
+            <div class="field-stack">
+              <label class="field-label" for="main-model-select">Main Agent</label>
+              <select id="main-model-select">
+                <option value="gpt-4o-mini" selected>gpt-4o-mini（預設）</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+                <option value="gpt-5.1">gpt-5.1</option>
+              </select>
+            </div>
+            <div class="field-stack">
+              <label class="field-label" for="helper-model-select">Helper Agents</label>
+              <select id="helper-model-select">
+                <option value="gpt-4o-mini" selected>gpt-4o-mini（預設）</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+                <option value="gpt-5-nano">gpt-5-nano</option>
+              </select>
+            </div>
+          </div>
         </section>
       </div>
 

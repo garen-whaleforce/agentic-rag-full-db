@@ -8,6 +8,7 @@ all related facts can be analysed in a single LLM prompt.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
@@ -20,6 +21,10 @@ from agents.prompts.prompts import comparative_agent_prompt
 # -------------------------------------------------------------------------
 # Token tracking
 # -------------------------------------------------------------------------
+MAX_FACTS_FOR_PEERS = int(os.getenv("MAX_FACTS_FOR_PEERS", "60"))
+MAX_PEER_FACTS = int(os.getenv("MAX_PEER_FACTS", "120"))
+
+
 class TokenTracker:
     """Aggregate token usage and rough cost estimation per run."""
 
@@ -56,10 +61,17 @@ class TokenTracker:
 class ComparativeAgent:
     """Compare a batch of facts against peer data stored in Neo4j."""
 
-    def __init__(self, credentials_file: str = "credentials.json", model: str = "gpt-4o-mini", sector_map: dict = None) -> None:
+    def __init__(
+        self,
+        credentials_file: str = "credentials.json",
+        model: str = "gpt-4o-mini",
+        sector_map: dict = None,
+        temperature: float = 0.0,
+    ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client = OpenAI(api_key=creds["openai_api_key"])
         self.model = model
+        self.temperature = temperature
         self.driver = GraphDatabase.driver(
             creds["neo4j_uri"], auth=(creds["neo4j_username"], creds["neo4j_password"])
         )
@@ -205,13 +217,15 @@ class ComparativeAgent:
         quarter: str,
         peers: Sequence[str] | None = None,
         sector: str | None = None,
-        top_k: int = 5,  # Lowered from 50 to 10
+        top_k: int = 8,  # Lowered from 50 to 10
     ) -> str:
         """Analyse a batch of facts; return one consolidated LLM answer."""
+        facts = list(facts)[:MAX_FACTS_FOR_PEERS]
         if not facts:
             return "No facts supplied."
         # Reset token tracker for this run
         self.token_tracker = TokenTracker()
+        peers_len = len(peers) if peers else 0
 
         # --- Per-fact similarity search and aggregation ---
         all_similar = []
@@ -232,6 +246,8 @@ class ComparativeAgent:
                 deduped_similar.append(sim)
                 seen.add(key)
 
+        print(f"[DEBUG] ComparativeAgent.run peers len={peers_len}, related_facts len={len(deduped_similar)}")
+        deduped_similar = deduped_similar[:MAX_PEER_FACTS]
         if not deduped_similar:
             return None
 
@@ -257,7 +273,7 @@ class ComparativeAgent:
                     {"role": "system", "content": "You are a financial forecasting assistant."},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0,
+                temperature=self.temperature,
                 top_p=1,
             )
             

@@ -19,6 +19,22 @@ _ASYNC_CLIENT: Optional[httpx.AsyncClient] = None
 logger = logging.getLogger(__name__)
 
 
+def _truncate_transcript_text(text: str) -> str:
+    """
+    Limit transcript length to avoid huge prompts.
+    Max length is controlled by MAX_TRANSCRIPT_CHARS env var (default 15000 chars).
+    """
+    if not text:
+        return ""
+    try:
+        max_chars = int(os.getenv("MAX_TRANSCRIPT_CHARS", "15000"))
+    except Exception:
+        max_chars = 15000
+    if max_chars <= 0:
+        return text
+    return text[:max_chars]
+
+
 def _require_api_key() -> str:
     if not FMP_API_KEY:
         raise RuntimeError("FMP_API_KEY is not set. Please configure it in your environment or .env file.")
@@ -516,7 +532,7 @@ def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
         "company": profile.get("company"),
         "sector": profile.get("sector"),
         "exchange": profile.get("exchange"),
-        "transcript_text": transcript.get("content", ""),
+        "transcript_text": _truncate_transcript_text(transcript.get("content", "")),
         "transcript_date": transcript.get("date"),
         "calendar_year": calendar_year,
         "calendar_quarter": calendar_quarter,
@@ -558,7 +574,7 @@ async def get_earnings_context_async(symbol: str, year: int, quarter: int) -> Di
         "company": profile.get("company"),
         "sector": profile.get("sector"),
         "exchange": profile.get("exchange"),
-        "transcript_text": transcript.get("content", ""),
+        "transcript_text": _truncate_transcript_text(transcript.get("content", "")),
         "transcript_date": transcript.get("date"),
         "calendar_year": calendar_year,
         "calendar_quarter": calendar_quarter,

@@ -146,7 +146,35 @@ def _push_dir(path: Path):
         os.chdir(cwd)
 
 
-def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_models(main_model: Optional[str], helper_model: Optional[str]) -> Dict[str, Any]:
+    """Return sanitized models and matching temperatures for main/helper agents."""
+    main_defaults = {
+        "gpt-5.1": 1.0,
+        "gpt-5-mini": 1.0,
+        "gpt-4o-mini": 0.0,
+    }
+    helper_defaults = {
+        "gpt-5-mini": 1.0,
+        "gpt-5-nano": 1.0,
+        "gpt-4o-mini": 0.0,
+    }
+
+    chosen_main = main_model if main_model in main_defaults else "gpt-4o-mini"
+    chosen_helper = helper_model if helper_model in helper_defaults else "gpt-4o-mini"
+
+    return {
+        "main_model": chosen_main,
+        "main_temperature": main_defaults[chosen_main],
+        "helper_model": chosen_helper,
+        "helper_temperature": helper_defaults[chosen_helper],
+    }
+
+
+def run_single_call_from_context(
+    context: Dict[str, Any],
+    main_model: Optional[str] = None,
+    helper_model: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Run the real Agentic RAG pipeline from the external repo for a single earnings call.
 
@@ -174,13 +202,29 @@ def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
 
     quarter_label = f"{year}-Q{quarter}"
     sector_map = _load_sector_map(repo_path)
+    model_cfg = _resolve_models(main_model, helper_model)
 
     with _push_dir(repo_path):
-        comparative_agent = ComparativeAgent(credentials_file=str(cred_path), sector_map=sector_map or None)
-        financials_agent = HistoricalPerformanceAgent(credentials_file=str(cred_path))
-        past_calls_agent = HistoricalEarningsAgent(credentials_file=str(cred_path))
+        comparative_agent = ComparativeAgent(
+            credentials_file=str(cred_path),
+            sector_map=sector_map or None,
+            model=model_cfg["helper_model"],
+            temperature=model_cfg["helper_temperature"],
+        )
+        financials_agent = HistoricalPerformanceAgent(
+            credentials_file=str(cred_path),
+            model=model_cfg["helper_model"],
+            temperature=model_cfg["helper_temperature"],
+        )
+        past_calls_agent = HistoricalEarningsAgent(
+            credentials_file=str(cred_path),
+            model=model_cfg["helper_model"],
+            temperature=model_cfg["helper_temperature"],
+        )
         main_agent = MainAgent(
             credentials_file=str(cred_path),
+            model=model_cfg["main_model"],
+            temperature=model_cfg["main_temperature"],
             comparative_agent=comparative_agent,
             financials_agent=financials_agent,
             past_calls_agent=past_calls_agent,
@@ -209,7 +253,7 @@ def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
             return "UNKNOWN", None
         import re
 
-        match = re.search(r"Direction:\s*(\d+)", summary)
+        match = re.search(r"Direction\s*:\s*(\d+)", summary, re.IGNORECASE)
         if match:
             score = int(match.group(1))
             if score >= 7:
@@ -251,6 +295,17 @@ def run_single_call_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
             reasons.append(f"{metric}: {val} {ctx}".strip())
 
     prediction, confidence = _infer_direction(agent_output.get("summary"))
+
+    meta = agent_output.setdefault("metadata", {})
+    meta.setdefault(
+        "models",
+        {
+            "main": model_cfg["main_model"],
+            "helpers": model_cfg["helper_model"],
+            "main_temperature": model_cfg["main_temperature"],
+            "helper_temperature": model_cfg["helper_temperature"],
+        },
+    )
 
     return {
         "prediction": prediction,

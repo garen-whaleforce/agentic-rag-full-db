@@ -203,7 +203,9 @@ Respond in **exactly** this format:
 
 <Couple of sentences of Explanation>
 
-**Summary: <Two sentences supporting your verdict with facts and evidence>, Direction : <0-10>**
+**Summary: <Two sentences supporting your verdict with facts and evidence>**
+
+Direction: <0-10>
 
 """.strip()
 

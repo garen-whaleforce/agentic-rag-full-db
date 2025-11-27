@@ -6,6 +6,7 @@ past financial statements in a single prompt.
 """
 
 from __future__ import annotations
+import os
 from pathlib import Path
 import json
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,10 @@ from agents.prompts.prompts import financials_statement_agent_prompt
 # -------------------------------------------------------------------------
 # Token tracking
 # -------------------------------------------------------------------------
+MAX_FACTS_FOR_FINANCIALS = int(os.getenv("MAX_FACTS_FOR_FINANCIALS", "40"))
+MAX_FINANCIAL_FACTS = int(os.getenv("MAX_FINANCIAL_FACTS", "80"))
+
+
 class TokenTracker:
     """Aggregate token usage and rough cost estimation per run."""
 
@@ -56,10 +61,16 @@ class TokenTracker:
 class HistoricalPerformanceAgent:
     """Compare current-quarter facts with prior financial statements."""
 
-    def __init__(self, credentials_file: str = "credentials.json", model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        credentials_file: str = "credentials.json",
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.0,
+    ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client = OpenAI(api_key=creds["openai_api_key"])
         self.model = model
+        self.temperature = temperature
         self.credentials_file = credentials_file
         self.driver = GraphDatabase.driver(
             creds["neo4j_uri"], auth=(creds["neo4j_username"], creds["neo4j_password"])
@@ -195,6 +206,7 @@ class HistoricalPerformanceAgent:
 
     def run(self, facts: List[Dict[str, str]], row, quarter, ticker: Optional[str] = None, top_n: int = 5) -> str:  # Lowered from 50 to 10
         """Batch: Compare all facts to all top-N similar past facts by embedding, and run the LLM prompt once for the batch."""
+        facts = list(facts)[:MAX_FACTS_FOR_FINANCIALS]
         if not facts:
             return "No facts provided."
 
@@ -224,6 +236,7 @@ class HistoricalPerformanceAgent:
 
         if not all_similar:
             return None
+        all_similar = all_similar[:MAX_FINANCIAL_FACTS]
 
         # Call the prompt ONCE for the batch
         prompt = financials_statement_agent_prompt(
@@ -238,7 +251,7 @@ class HistoricalPerformanceAgent:
                 {"role": "system", "content": "You are a financial forecasting assistant."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0,
+            temperature=self.temperature,
             top_p=1,
         )
         

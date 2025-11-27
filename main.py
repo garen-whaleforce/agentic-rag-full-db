@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -54,6 +54,12 @@ class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Ticker symbol, e.g., AAPL")
     year: int = Field(..., description="Fiscal year")
     quarter: int = Field(..., description="Fiscal quarter (1-4)")
+    main_model: Optional[Literal["gpt-5.1", "gpt-5-mini", "gpt-4o-mini"]] = Field(
+        None, description="Main agent model override"
+    )
+    helper_model: Optional[Literal["gpt-5-mini", "gpt-4o-mini"]] = Field(
+        None, description="Helper agents model override"
+    )
 
 class BatchAnalyzeRequest(BaseModel):
     tickers: list[str] = Field(..., description="List of ticker symbols")
@@ -81,7 +87,13 @@ def api_transcript_dates(symbol: str = Query(..., description="Ticker symbol")) 
 @app.post("/api/analyze")
 async def api_analyze(payload: AnalyzeRequest):
     try:
-        result = await analyze_earnings_async(payload.symbol, payload.year, payload.quarter)
+        result = await analyze_earnings_async(
+            payload.symbol,
+            payload.year,
+            payload.quarter,
+            payload.main_model,
+            payload.helper_model,
+        )
         return JSONResponse(result)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

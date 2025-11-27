@@ -18,6 +18,8 @@ const metaCompany = document.getElementById("meta-company");
 const metaSector = document.getElementById("meta-sector");
 const agenticContent = document.getElementById("agentic-content");
 const debugJson = document.getElementById("debug-json");
+const mainModelSelect = document.getElementById("main-model-select");
+const helperModelSelect = document.getElementById("helper-model-select");
 const kpiPred = document.getElementById("kpi-pred");
 const kpiConf = document.getElementById("kpi-conf");
 const kpiReturn = document.getElementById("kpi-return");
@@ -36,6 +38,19 @@ const batchInput = document.getElementById("batch-input");
 const batchBtn = document.getElementById("batch-btn");
 const batchStatus = document.getElementById("batch-status");
 const batchResults = document.getElementById("batch-results");
+const analysisProgress = document.getElementById("analysis-progress");
+const cancelBtn = document.getElementById("cancel-btn");
+let progressTimer = null;
+let progressIndex = 0;
+let progressDotTimer = null;
+let abortController = null;
+const progressSteps = [
+  "開始分析",
+  "擷取逐字稿與財報",
+  "路由與幫手分析",
+  "彙整主結論",
+];
+let currentProgressText = "";
 
 function setStatus(message, tone = "muted") {
   statusEl.textContent = message;
@@ -52,6 +67,37 @@ function renderResultsSkeleton() {
     )
     .join("");
   resultsEl.innerHTML = placeholder;
+}
+
+function startAnalysisProgress() {
+  if (!analysisProgress) return;
+  progressIndex = 0;
+  currentProgressText = progressSteps[progressIndex] || "開始分析";
+  clearInterval(progressTimer);
+  progressTimer = setInterval(() => {
+    if (progressIndex < progressSteps.length - 1) {
+      progressIndex += 1;
+    }
+    currentProgressText = progressSteps[progressIndex] || "";
+  }, 5000);
+  clearInterval(progressDotTimer);
+  let dots = 0;
+  progressDotTimer = setInterval(() => {
+    if (!analysisProgress) return;
+    dots = (dots + 1) % 4;
+    const suffix = ".".repeat(dots || 3);
+    analysisProgress.textContent = `${currentProgressText}${suffix}`;
+  }, 600);
+}
+
+function stopAnalysisProgress(message = "") {
+  clearInterval(progressTimer);
+  progressTimer = null;
+  clearInterval(progressDotTimer);
+  progressDotTimer = null;
+  if (analysisProgress) {
+    analysisProgress.textContent = message;
+  }
 }
 
 async function fetchDatesForSymbol(symbol) {
@@ -182,12 +228,12 @@ function populateDatesSelect() {
   availableDates.forEach((d) => {
     const opt = document.createElement("option");
     opt.value = `${d.year}|${d.quarter}`;
-    const labelDate = d.date ? ` · ${d.date}` : "";
+    const labelDate = d.date ? d.date : "";
     const cal =
       d.calendar_year && d.calendar_quarter
         ? `CY${d.calendar_year} Q${d.calendar_quarter}`
         : `CY?`;
-    opt.textContent = `${cal}${labelDate ? " · " + labelDate : ""}`;
+    opt.textContent = `${cal}${labelDate ? " / " + labelDate : ""}`;
     datesSelect.appendChild(opt);
   });
   datesHint.textContent = `共 ${availableDates.length} 筆季度資料。`;
@@ -200,7 +246,15 @@ function renderAgentic(result) {
     return;
   }
   const { prediction, confidence, summary, reasons, next_steps, metadata } = result;
-  const engineLabel = "";
+  const modelMeta = metadata?.models;
+  const formatModel = (model, temp) => {
+    if (!model) return "-";
+    if (temp == null || Number.isNaN(Number(temp))) return model;
+    return `${model} (T=${Number(temp).toFixed(2)})`;
+  };
+  const engineLabel = modelMeta
+    ? `Main: ${formatModel(modelMeta.main, modelMeta.main_temperature)} · Helpers: ${formatModel(modelMeta.helpers, modelMeta.helper_temperature)}`
+    : "";
   const tokenUsage = (result.raw && result.raw.token_usage) || metadata?.token_usage || {};
   const formatReasonBody = (text) => {
     if (!text) return "<p>-</p>";
@@ -321,11 +375,20 @@ async function runAnalysis() {
   }
   agenticContent.innerHTML = `<div class="control-row"><span class="spinner"></span><span class="muted small">分析中...</span></div>`;
   debugJson.textContent = "{}";
+  startAnalysisProgress();
+  abortController = new AbortController();
+  if (cancelBtn) {
+    cancelBtn.disabled = false;
+  }
   const [yearStr, quarterStr] = datesSelect.value.split("|");
+  const mainModel = (mainModelSelect && mainModelSelect.value) || "gpt-4o-mini";
+  const helperModel = (helperModelSelect && helperModelSelect.value) || "gpt-4o-mini";
   const payload = {
     symbol: selectedSymbol,
     year: Number(yearStr),
     quarter: Number(quarterStr),
+    main_model: mainModel,
+    helper_model: helperModel,
   };
 
   analyzeBtn.disabled = true;
@@ -337,6 +400,7 @@ async function runAnalysis() {
     const res = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: abortController.signal,
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -401,12 +465,19 @@ async function runAnalysis() {
     detailBaselineSummary.textContent = summarize(detailBaseline.textContent);
     detailTokensSummary.textContent = summarize(detailTokens.textContent);
     setStatus("分析完成");
+    stopAnalysisProgress("分析完成");
   } catch (err) {
     console.error(err);
     setStatus(`分析失敗：${err.message}`, "error");
+    stopAnalysisProgress("分析失敗");
   } finally {
     analyzeBtn.disabled = availableDates.length === 0;
     analyzeBtn.textContent = originalLabel;
+    if (!progressTimer) stopAnalysisProgress("");
+    if (cancelBtn) {
+      cancelBtn.disabled = true;
+    }
+    abortController = null;
   }
 }
 
@@ -415,6 +486,18 @@ searchInput.addEventListener("keyup", (e) => {
   if (e.key === "Enter") searchSymbols();
 });
 analyzeBtn.addEventListener("click", runAnalysis);
+if (cancelBtn) {
+  cancelBtn.addEventListener("click", () => {
+    if (abortController) {
+      abortController.abort();
+      setStatus("已停止分析", "error");
+      stopAnalysisProgress("已停止分析");
+      if (cancelBtn) cancelBtn.disabled = true;
+      analyzeBtn.disabled = availableDates.length === 0;
+      agenticContent.innerHTML = '<p class="muted">已停止分析。</p>';
+    }
+  });
+}
 if (batchBtn) {
   batchBtn.addEventListener("click", runBatch);
 }

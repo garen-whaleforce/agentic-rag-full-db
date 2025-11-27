@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -35,6 +36,11 @@ FIELD = re.compile(r"\*\*(.+?):\*\*\s*(.+)")
 # ---------------------------------------------------------------------------
 # Token tracking
 # ---------------------------------------------------------------------------
+
+DEFAULT_TRANSCRIPT_CHARS_PER_CHUNK = 8000
+MAX_FACTS_PER_HELPER = int(os.getenv("MAX_FACTS_PER_HELPER", "80"))
+
+
 class TokenTracker:
     """Aggregate token usage and rough cost estimation per run."""
 
@@ -108,6 +114,7 @@ class MainAgent:
     credentials_file: Union[str, Path] | None = None
     credentials_path: Union[str, Path] | None = None
     model: str = "gpt-4o-mini"
+    temperature: float = 0.0
 
     financials_agent: BaseHelperAgent | None = None
     past_calls_agent: BaseHelperAgent | None = None
@@ -129,7 +136,12 @@ class MainAgent:
         """Wrapper around OpenAI chat completion with token tracking."""
         msgs = [{"role": "system", "content": system}] if system else []
         msgs.append({"role": "user", "content": prompt})
-        resp = self.client.chat.completions.create(model=self.model, messages=msgs, temperature=0, top_p=1)
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=msgs,
+            temperature=self.temperature,
+            top_p=1,
+        )
 
         if hasattr(resp, "usage") and resp.usage:
             self.token_tracker.add_usage(
@@ -143,10 +155,52 @@ class MainAgent:
     # ---------------------------------------------------------------------
     # 1) Extraction (single call, no chunking)
     # ---------------------------------------------------------------------
+    def _chunk_transcript(self, transcript: str, max_chars: int = DEFAULT_TRANSCRIPT_CHARS_PER_CHUNK) -> List[str]:
+        """
+        Split a long transcript into smaller chunks based on paragraphs.
+        The goal is to keep each chunk under `max_chars` characters while
+        preserving paragraph boundaries where possible.
+        """
+        if not transcript:
+            return []
+
+        chunks: List[str] = []
+        current_parts: List[str] = []
+        current_len = 0
+
+        for para in transcript.split("\n\n"):
+            para = para.strip()
+            if not para:
+                continue
+            para_len = len(para) + 2  # include spacing/newlines
+
+            if current_parts and current_len + para_len > max_chars:
+                chunks.append("\n\n".join(current_parts))
+                current_parts = [para]
+                current_len = para_len
+            else:
+                current_parts.append(para)
+                current_len += para_len
+
+        if current_parts:
+            chunks.append("\n\n".join(current_parts))
+
+        return chunks
+
     def extract(self, transcript: str) -> List[Dict[str, str]]:
-        """Extract facts from a transcript chunk."""
-        raw = self._chat(facts_extraction_prompt(transcript), system="You are a precise extraction bot.")
-        return _parse_items(raw)
+        """Extract facts from a transcript, chunking long transcripts to reduce context size."""
+        chunks = self._chunk_transcript(transcript, max_chars=DEFAULT_TRANSCRIPT_CHARS_PER_CHUNK)
+        if not chunks:
+            chunks = [transcript] if transcript else []
+
+        all_items: List[Dict[str, str]] = []
+        for chunk in chunks:
+            if not chunk:
+                continue
+            raw = self._chat(facts_extraction_prompt(chunk), system="You are a precise extraction bot.")
+            items = _parse_items(raw)
+            all_items.extend(items)
+        return all_items
 
     # ---------------------------------------------------------------------
     # 2) Delegation (batched)
@@ -204,48 +258,72 @@ class MainAgent:
 
         # Step 3: Bucket facts by tool
         buckets = self._bucket_by_tool(tool_map, items)
+        if "CompareWithPeers" in buckets:
+            print(f"[DEBUG] CompareWithPeers bucket size before helper: {len(buckets.get('CompareWithPeers', []))}")
+        else:
+            print("[DEBUG] CompareWithPeers bucket size before helper: 0")
 
         # Step 4: Run agents in parallel, with chunking (batch size 10)
         self._batch_notes: Dict[str, str] = {}
         tasks = []
+        future_keys: Dict[Any, str] = {}
         with ThreadPoolExecutor(max_workers=3) as executor:
             if self.financials_agent and "InspectPastStatements" in buckets:
                 def run_financials():
                     facts_for_financials = _ensure_list_of_dicts(buckets["InspectPastStatements"])
+                    facts_for_financials = facts_for_financials[:MAX_FACTS_PER_HELPER]
                     res = self.financials_agent.run(facts_for_financials, row, quarter, ticker)
                     return ("financials", res)
-                tasks.append(executor.submit(run_financials))
+                fut = executor.submit(run_financials)
+                tasks.append(fut)
+                future_keys[fut] = "financials"
 
             if self.past_calls_agent and "QueryPastCalls" in buckets:
                 facts_for_past = _ensure_list_of_dicts(buckets["QueryPastCalls"])
+                facts_for_past = facts_for_past[:MAX_FACTS_PER_HELPER]
 
                 def run_past_calls():
                     res = self.past_calls_agent.run(facts_for_past, ticker, quarter)
                     return ("past", res)
-                tasks.append(executor.submit(run_past_calls))
+                fut = executor.submit(run_past_calls)
+                tasks.append(fut)
+                future_keys[fut] = "past"
             
             if self.comparative_agent and "CompareWithPeers" in buckets:
                 facts_for_peers = _ensure_list_of_dicts(buckets["CompareWithPeers"])
+                facts_for_peers = facts_for_peers[:MAX_FACTS_PER_HELPER]
                 sector = row.get("sector") if isinstance(row, dict) else getattr(row, "sector", None)
 
                 def run_comparative():
                     res = self.comparative_agent.run(facts_for_peers, ticker, quarter, peers, sector=sector)
                     return ("peers", res)
-                tasks.append(executor.submit(run_comparative))
+                fut = executor.submit(run_comparative)
+                tasks.append(fut)
+                future_keys[fut] = "peers"
 
             for future in as_completed(tasks):
+                key = future_keys.get(future, "unknown")
                 try:
-                    key, result = future.result()
+                    result = future.result()
+                    if isinstance(result, tuple) and len(result) == 2:
+                        task_key, payload = result
+                        key = task_key or key
+                        result = payload
                     self._batch_notes[key] = result
                     if result is None:
                         print(f"[AGENT LOG] Agent '{key}' failed or timed out for ticker={ticker}, quarter={quarter} (returned None)")
                 except Exception as e:
                     print(f"[AGENT LOG] Agent '{key}' failed with exception for ticker={ticker}, quarter={quarter}: {e}")
                     print(f"\u26a0\ufe0f Agent failed: {e}")
+                    self._batch_notes[key] = f"[error] {e}"
 
         # Optional: attach tool usage to each fact
         for i, f in enumerate(items):
             f["tools"] = tool_map.get(i, [])
+        if "CompareWithPeers" in buckets:
+            print(f"[DEBUG] CompareWithPeers bucket size after helper: {len(buckets.get('CompareWithPeers', []))}")
+        else:
+            print("[DEBUG] CompareWithPeers bucket size after helper: 0")
 
     # ---------------------------------------------------------------------
     # 3) Summary
@@ -281,9 +359,10 @@ class MainAgent:
             "past"      : self._flatten_notes(self._batch_notes.get("past", None)),
             "peers"     : self._flatten_notes(self._batch_notes.get("peers", None)),
         }
-        # If all three are None, set to dummy string
-        if all(v is None or v == "" for v in notes.values()):
-            notes = {"financials": "N/A", "past": "N/A", "peers": "N/A"}
+        # Ensure each note has a fallback value
+        for k, v in list(notes.items()):
+            if v is None or v == "":
+                notes[k] = "N/A"
 
         # Format and include QoQChange facts as a dedicated section
         qoq_facts = [f for f in items if f.get('type') == 'YoYChange']

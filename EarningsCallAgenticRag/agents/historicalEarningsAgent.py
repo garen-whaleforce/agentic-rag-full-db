@@ -4,8 +4,11 @@ Compare current facts with the firm's own historical facts.
 • **Added:** Token usage tracking for cost monitoring
 """
 
+from __future__ import annotations
+
 import json
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -19,6 +22,10 @@ from agents.prompts.prompts import historical_earnings_agent_prompt
 # -------------------------------------------------------------------------
 # Token tracking
 # -------------------------------------------------------------------------
+MAX_FACTS_FOR_PAST = int(os.getenv("MAX_FACTS_FOR_PAST", "40"))
+MAX_HISTORICAL_FACTS = int(os.getenv("MAX_HISTORICAL_FACTS", "80"))
+
+
 class TokenTracker:
     """Aggregate token usage and rough cost estimation per run."""
 
@@ -55,10 +62,16 @@ class TokenTracker:
 class HistoricalEarningsAgent:
     """Compare current facts with the firm's own historical facts."""
 
-    def __init__(self, credentials_file: str = "credentials.json", model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        credentials_file: str = "credentials.json",
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.0,
+    ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client = OpenAI(api_key=creds["openai_api_key"])
         self.model = model
+        self.temperature = temperature
         self.driver = GraphDatabase.driver(
             creds["neo4j_uri"], auth=(creds["neo4j_username"], creds["neo4j_password"])
         )
@@ -203,6 +216,7 @@ class HistoricalEarningsAgent:
         top_k: int = 5,  # Lowered from 50 to 10
     ) -> str:
         """Batch: For each fact, find similar historical facts, aggregate, and run the LLM prompt once for the batch."""
+        facts = list(facts)[:MAX_FACTS_FOR_PAST]
         if not facts:
             return "❌ No facts supplied."
 
@@ -228,6 +242,7 @@ class HistoricalEarningsAgent:
                 deduped_similar.append(sim)
                 seen.add(key)
 
+        deduped_similar = deduped_similar[:MAX_HISTORICAL_FACTS]
         if not deduped_similar:
             return None
 
@@ -239,7 +254,7 @@ class HistoricalEarningsAgent:
                 {"role": "system", "content": "You are a financial forecasting assistant."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0,
+            temperature=self.temperature,
             top_p=1,
         )
         

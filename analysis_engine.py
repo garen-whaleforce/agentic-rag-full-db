@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 from uuid import uuid4
 
 from agentic_rag_bridge import AgenticRagBridgeError, run_single_call_from_context
@@ -13,7 +13,11 @@ from storage import record_analysis
 logger = logging.getLogger(__name__)
 
 
-def run_agentic_rag(context: Dict) -> Dict:
+def run_agentic_rag(
+    context: Dict,
+    main_model: Optional[str] = None,
+    helper_model: Optional[str] = None,
+) -> Dict:
     """
     Call the real Agentic RAG pipeline via the bridge module.
     """
@@ -26,11 +30,11 @@ def run_agentic_rag(context: Dict) -> Dict:
             context["ingest_warning"] = msg
 
     # First, backfill recent historical quarters so helper agents have past facts.
-    history_quarters = 4
+    history_quarters = 2
     try:
-        history_quarters = int(os.getenv("INGEST_HISTORY_QUARTERS", "4"))
+        history_quarters = int(os.getenv("INGEST_HISTORY_QUARTERS", "2"))
     except Exception:
-        history_quarters = 4
+        history_quarters = 2
 
     try:
         _retry(lambda: ingest_recent_history_into_neo4j(context, max_quarters=history_quarters))
@@ -53,7 +57,11 @@ def run_agentic_rag(context: Dict) -> Dict:
         logger.warning("Neo4j ingestion failed: %s", exc)
 
     try:
-        result = run_single_call_from_context(context)
+        result = run_single_call_from_context(
+            context,
+            main_model=main_model,
+            helper_model=helper_model,
+        )
     except AgenticRagBridgeError:
         # Propagate bridge-specific errors directly for clearer API feedback
         raise
@@ -72,13 +80,23 @@ def run_agentic_rag(context: Dict) -> Dict:
     return result
 
 
-def analyze_earnings(symbol: str, year: int, quarter: int) -> Dict:
+def analyze_earnings(
+    symbol: str,
+    year: int,
+    quarter: int,
+    main_model: Optional[str] = None,
+    helper_model: Optional[str] = None,
+) -> Dict:
     """
     High-level orchestration: build context and run the Agentic RAG bridge.
     """
     job_id = str(uuid4())
     context = get_earnings_context(symbol, year, quarter)
-    agentic_result = run_agentic_rag(context)
+    agentic_result = run_agentic_rag(
+        context,
+        main_model=main_model,
+        helper_model=helper_model,
+    )
     if not isinstance(agentic_result, dict):
         agentic_result = {"raw_output": agentic_result}
 
@@ -138,13 +156,24 @@ def analyze_earnings(symbol: str, year: int, quarter: int) -> Dict:
     return payload
 
 
-async def analyze_earnings_async(symbol: str, year: int, quarter: int) -> Dict:
+async def analyze_earnings_async(
+    symbol: str,
+    year: int,
+    quarter: int,
+    main_model: Optional[str] = None,
+    helper_model: Optional[str] = None,
+) -> Dict:
     """
     Async wrapper: fetch context in parallel and run agentic pipeline in thread to avoid blocking event loop.
     """
     job_id = str(uuid4())
     context = await get_earnings_context_async(symbol, year, quarter)
-    agentic_result = await asyncio.to_thread(run_agentic_rag, context)
+    agentic_result = await asyncio.to_thread(
+        run_agentic_rag,
+        context,
+        main_model,
+        helper_model,
+    )
     if not isinstance(agentic_result, dict):
         agentic_result = {"raw_output": agentic_result}
 
