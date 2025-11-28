@@ -201,6 +201,11 @@ def get_company_profile(symbol: str) -> Dict:
         "industry": first.get("industry"),
         "country": first.get("country"),
     }
+    raw_cap = first.get("mktCap") or first.get("marketCap")
+    try:
+        out["market_cap"] = float(raw_cap) if raw_cap is not None else None
+    except Exception:
+        out["market_cap"] = None
     set_fmp_cache(cache_key, out)
     return out
 
@@ -214,6 +219,14 @@ def get_market_cap(symbol: str) -> Optional[float]:
 
     _require_api_key()
     cache_ttl = int(os.getenv("MARKET_CAP_CACHE_MIN", "1440"))
+    profile_cache = get_fmp_cache(f"fmp:profile:{symbol.upper()}", max_age_minutes=cache_ttl)
+    if profile_cache:
+        try:
+            cached_cap = profile_cache.get("market_cap")
+            if cached_cap is not None:
+                return float(cached_cap)
+        except Exception:
+            pass
     cache_key = f"fmp:market-cap:{symbol.upper()}"
     cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
     if cached is not None:
@@ -291,16 +304,16 @@ def get_earnings_calendar_for_date(
         profile = get_company_profile(symbol)
         country = (profile.get("country") or "").upper()
         exchange = (profile.get("exchange") or "").upper()
-        if country:
-            if country not in allowed_countries:
-                continue
-        elif exchange:
+        if exchange:
             if not any(exchange.startswith(pref) for pref in allowed_exchange_prefixes):
                 continue
         else:
-            # If no country/exchange info, skip to avoid non-US entries.
-            continue
-        market_cap = get_market_cap(symbol)
+            if not country or country not in allowed_countries:
+                continue
+
+        market_cap = profile.get("market_cap")
+        if market_cap is None:
+            market_cap = get_market_cap(symbol)
         if market_cap is None or market_cap < min_market_cap:
             continue
 

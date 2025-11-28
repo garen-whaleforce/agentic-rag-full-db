@@ -69,18 +69,24 @@ async def _schedule_earnings_calendar_prefetch():
         pass
 
     async def prefetch_loop():
+        first_run = True
         while True:
             try:
                 if tz is not None:
                     now = datetime.now(tz)
                 else:
                     now = datetime.utcnow()
-                target = now.replace(hour=6, minute=0, second=0, microsecond=0)
-                if target <= now:
-                    target = target + timedelta(days=1)
-                wait_seconds = (target - now).total_seconds()
-                if wait_seconds < 0:
-                    wait_seconds = 60.0
+                if first_run:
+                    target = now
+                    wait_seconds = 0
+                    first_run = False
+                else:
+                    target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+                    if target <= now:
+                        target = target + timedelta(days=1)
+                    wait_seconds = (target - now).total_seconds()
+                    if wait_seconds < 0:
+                        wait_seconds = 60.0
                 await asyncio.sleep(wait_seconds)
 
                 if tz is not None:
