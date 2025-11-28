@@ -242,7 +242,6 @@ class HistoricalPerformanceAgent:
         prompt = financials_statement_agent_prompt(
             fact=facts,  # pass the list of facts
             similar_facts=all_similar,  # pass the aggregated similar facts
-            quarter=quarter
         )
         
         resp = self.client.chat.completions.create(
