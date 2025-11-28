@@ -67,9 +67,10 @@ function getDateStrFromOffset(offsetDays = 0) {
 
 function getDayLabel(offset) {
   if (offset === 0) return "今日";
-  if (offset === 1) return "昨天";
-  if (offset === 2) return "前天";
-  return `${offset} 天前`;
+  if (offset === -1) return "明天";
+  if (offset === -2) return "後天";
+  if (offset > 0) return `${offset} 天前`;
+  return `${Math.abs(offset)} 天後`;
 }
 
 function setStatus(message, tone = "muted") {
