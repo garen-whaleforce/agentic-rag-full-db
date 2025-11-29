@@ -13,3 +13,4 @@ transformers
 tqdm
 uvicorn[standard]
 psycopg2-binary
+redis>=5.0.0

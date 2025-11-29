@@ -65,7 +65,7 @@ class ComparativeAgent:
         credentials_file: str = "credentials.json",
         model: str = "gpt-5-mini",
         sector_map: dict = None,
-        temperature: float = 0.3,
+        temperature: float = 1.0,
         **kwargs,
     ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
@@ -333,7 +333,6 @@ class ComparativeAgent:
                     {"role": "system", "content": COMPARATIVE_SYSTEM_MESSAGE},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=self.temperature,
                 top_p=1,
             )
             

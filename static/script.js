@@ -495,8 +495,8 @@ async function runAnalysis() {
   }
   lastAnalysisResult = null;
   const [yearStr, quarterStr] = datesSelect.value.split("|");
-  const mainModel = (mainModelSelect && mainModelSelect.value) || "gpt-4o-mini";
-  const helperModel = (helperModelSelect && helperModelSelect.value) || "gpt-4o-mini";
+  const mainModel = (mainModelSelect && mainModelSelect.value) || "gpt-5.1";
+  const helperModel = (helperModelSelect && helperModelSelect.value) || "gpt-5-mini";
   const payload = {
     symbol: selectedSymbol,
     year: Number(yearStr),

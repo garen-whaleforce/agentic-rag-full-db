@@ -118,7 +118,7 @@ class MainAgent:
     credentials_file: Union[str, Path] | None = None
     credentials_path: Union[str, Path] | None = None
     model: str = "gpt-5.1"
-    temperature: float = 0.7
+    temperature: float = 1.0
 
     financials_agent: BaseHelperAgent | None = None
     past_calls_agent: BaseHelperAgent | None = None
@@ -144,7 +144,6 @@ class MainAgent:
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=msgs,
-            temperature=self.temperature,
             top_p=1,
         )
 

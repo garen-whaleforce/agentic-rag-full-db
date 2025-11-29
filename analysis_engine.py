@@ -8,9 +8,16 @@ from uuid import uuid4
 from agentic_rag_bridge import AgenticRagBridgeError, run_single_call_from_context
 from neo4j_ingest import Neo4jIngestError, ingest_context_into_neo4j, ingest_recent_history_into_neo4j
 from fmp_client import get_earnings_context, get_earnings_context_async
-from storage import record_analysis
+from storage import (
+    record_analysis,
+    get_cached_payload,
+    set_cached_payload,
+)
+from redis_cache import cache_get_json, cache_set_json
 
 logger = logging.getLogger(__name__)
+PAYLOAD_CACHE_MINUTES = int(os.getenv("PAYLOAD_CACHE_MINUTES", "1440"))  # DB cache validity in minutes (default 1 day)
+REDIS_PAYLOAD_TTL_SECONDS = int(os.getenv("REDIS_PAYLOAD_TTL_SECONDS", "3600"))  # Redis TTL in seconds (default 1 hour)
 
 
 def run_agentic_rag(
@@ -166,6 +173,32 @@ async def analyze_earnings_async(
     """
     Async wrapper: fetch context in parallel and run agentic pipeline in thread to avoid blocking event loop.
     """
+    cache_key = f"call:{symbol.upper()}:{year}:Q{quarter}"
+
+    # 1) Redis cache
+    cached_payload = await cache_get_json(cache_key)
+    if isinstance(cached_payload, dict) and cached_payload.get("symbol"):
+        return cached_payload
+
+    # 2) DB cache
+    try:
+        db_cached = get_cached_payload(
+            symbol=symbol,
+            fiscal_year=year,
+            fiscal_quarter=quarter,
+            max_age_minutes=PAYLOAD_CACHE_MINUTES,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_cached_payload failed, ignoring cache", exc_info=exc)
+        db_cached = None
+
+    if isinstance(db_cached, dict) and db_cached.get("symbol"):
+        try:
+            await cache_set_json(cache_key, db_cached, REDIS_PAYLOAD_TTL_SECONDS)
+        except Exception:
+            pass
+        return db_cached
+
     job_id = str(uuid4())
     context = await get_earnings_context_async(symbol, year, quarter)
     agentic_result = await asyncio.to_thread(
@@ -227,6 +260,17 @@ async def analyze_earnings_async(
         "agentic_result": agentic_result,
         "context": context,
     }
+
+    try:
+        set_cached_payload(symbol, year, quarter, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("set_cached_payload failed, ignoring", exc_info=exc)
+
+    try:
+        await cache_set_json(cache_key, payload, REDIS_PAYLOAD_TTL_SECONDS)
+    except Exception:
+        pass
+
     return payload
 # Simple retry helper for Neo4j ingest
 def _retry(func, attempts: int = 3, delay: float = 1.0):

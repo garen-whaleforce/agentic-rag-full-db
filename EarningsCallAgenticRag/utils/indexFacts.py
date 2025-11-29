@@ -103,7 +103,6 @@ class IndexFacts:
                 {"role": "system", "content": "You are a financial information extraction assistant."},
                 {"role": "user", "content": facts_extraction_prompt(text)},
             ],
-            temperature=0,
         )
         return _parse_markdown_items(resp.choices[0].message.content.strip())
 

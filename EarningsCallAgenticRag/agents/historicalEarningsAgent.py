@@ -65,7 +65,7 @@ class HistoricalEarningsAgent:
         self,
         credentials_file: str = "credentials.json",
         model: str = "gpt-5-mini",
-        temperature: float = 0.3,
+        temperature: float = 1.0,
     ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client, resolved_model = build_chat_client(creds, model)
@@ -250,7 +250,6 @@ class HistoricalEarningsAgent:
                 {"role": "system", "content": HISTORICAL_EARNINGS_SYSTEM_MESSAGE},
                 {"role": "user", "content": prompt},
             ],
-            temperature=self.temperature,
             top_p=1,
         )
         
