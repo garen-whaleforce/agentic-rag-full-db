@@ -51,6 +51,8 @@ let progressIndex = 0;
 let progressDotTimer = null;
 let abortController = null;
 let lastAnalysisResult = null;
+let batchPollTimer = null;
+let activeBatchId = null;
 const progressSteps = [
   "開始分析",
   "擷取逐字稿與財報",
@@ -675,6 +677,68 @@ function wireDetailToggles() {
   });
 }
 
+function stopBatchPolling() {
+  if (batchPollTimer) {
+    clearInterval(batchPollTimer);
+    batchPollTimer = null;
+  }
+}
+
+async function pollBatch(jobId) {
+  if (!jobId) return;
+  activeBatchId = jobId;
+  const poll = async () => {
+    try {
+      const res = await fetch(`/api/batch-analyze/${jobId}`);
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      const data = await res.json();
+      const total = data.total || 0;
+      const completed = data.completed || 0;
+      const status = data.status || "queued";
+      const current = data.current || "";
+      const progressTxt = total ? `${completed}/${total}` : `${completed}`;
+      const prefix =
+        status === "completed"
+          ? "完成"
+          : status === "failed"
+          ? "批次失敗"
+          : status === "running"
+          ? "處理中"
+          : "排隊中";
+      const currentTxt = current ? ` | 處理 ${current}` : "";
+      batchStatus.innerHTML =
+        status === "completed" || status === "failed"
+          ? `${prefix}：${progressTxt} 檔`
+          : `<span class="spinner"></span> ${prefix}：${progressTxt} 檔${currentTxt}`;
+      renderBatch(data.results || []);
+      if (status === "completed" || status === "failed") {
+        if (status === "failed" && data.error) {
+          batchStatus.textContent = `${prefix}：${data.error}`;
+        }
+        stopBatchPolling();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error(err);
+      batchStatus.textContent = `批次失敗：${err.message}`;
+      stopBatchPolling();
+      return true;
+    }
+  };
+  const done = await poll();
+  stopBatchPolling();
+  if (done) return;
+  batchPollTimer = setInterval(async () => {
+    const finished = await poll();
+    if (finished) {
+      stopBatchPolling();
+    }
+  }, 2000);
+}
+
 async function runBatch() {
   const raw = batchInput.value || "";
   const tickers = raw
@@ -685,7 +749,8 @@ async function runBatch() {
     batchStatus.textContent = "請輸入至少一個 ticker";
     return;
   }
-  batchStatus.innerHTML = `<span class="spinner"></span> 批次分析中...`;
+  stopBatchPolling();
+  batchStatus.innerHTML = `<span class="spinner"></span> 提交批次中...`;
   batchResults.innerHTML = "";
   try {
     const res = await fetch("/api/batch-analyze", {
@@ -697,9 +762,11 @@ async function runBatch() {
       throw new Error(await res.text());
     }
     const data = await res.json();
-    const rows = data.results || [];
-    renderBatch(rows);
-    batchStatus.textContent = `完成：${rows.length} 檔`;
+    if (!data.job_id) {
+      throw new Error("missing job_id");
+    }
+    batchStatus.innerHTML = `<span class="spinner"></span> 已提交，Job ${data.job_id}，排隊中...`;
+    await pollBatch(data.job_id);
   } catch (err) {
     console.error(err);
     batchStatus.textContent = `批次失敗：${err.message}`;

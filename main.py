@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -173,6 +173,126 @@ class TranslateResponse(BaseModel):
     historical_performance_zh: str = ""
 
 
+# In-memory batch job registry for background batch processing
+_BATCH_JOBS: Dict[str, Dict[str, Any]] = {}
+_BATCH_LOCK: Optional[asyncio.Lock] = None
+
+
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _get_batch_lock() -> asyncio.Lock:
+    global _BATCH_LOCK
+    if _BATCH_LOCK is None:
+        _BATCH_LOCK = asyncio.Lock()
+    return _BATCH_LOCK
+
+
+async def _create_batch_job(tickers: List[str], latest_only: bool) -> str:
+    """
+    Register a job and schedule background execution.
+    """
+    job_id = str(uuid4())
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+        "latest_only": latest_only,
+        "total": len(tickers),
+        "completed": 0,
+        "results": [],
+        "error": None,
+        "current": None,
+    }
+    async with _get_batch_lock():
+        _BATCH_JOBS[job_id] = job
+    asyncio.create_task(_run_batch_job(job_id, tickers, latest_only))
+    return job_id
+
+
+async def _get_batch_job(job_id: str) -> Optional[Dict[str, Any]]:
+    async with _get_batch_lock():
+        job = _BATCH_JOBS.get(job_id)
+        if not job:
+            return None
+        # shallow copy is fine for read-only responses; results list will be reused
+        return dict(job)
+
+
+async def _update_batch_job(job_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    async with _get_batch_lock():
+        job = _BATCH_JOBS.get(job_id)
+        if not job:
+            return None
+        job.update(kwargs)
+        job["updated_at"] = _now_iso()
+        return dict(job)
+
+
+async def _append_batch_result(job_id: str, row: Dict[str, Any]) -> None:
+    async with _get_batch_lock():
+        job = _BATCH_JOBS.get(job_id)
+        if not job:
+            return
+        job.setdefault("results", []).append(row)
+        job["completed"] = len(job["results"])
+        total = job.get("total") or 0
+        job["progress"] = job["completed"] / total if total else 1.0
+        job["updated_at"] = _now_iso()
+
+
+async def _resolve_latest_quarter(sym: str) -> Tuple[int, int]:
+    """
+    Pick the latest available fiscal year/quarter; fall back to calendar year/quarter.
+    """
+    dates = get_transcript_dates(sym)
+    valid: List[Tuple[int, int]] = []
+    for d in dates:
+        y = d.get("year") or d.get("calendar_year")
+        q = d.get("quarter") or d.get("calendar_quarter")
+        if y is None or q is None:
+            continue
+        try:
+            valid.append((int(y), int(q)))
+        except Exception:
+            continue
+    if not valid:
+        raise ValueError("no transcript dates")
+    valid.sort(reverse=True)
+    return valid[0]
+
+
+async def _run_batch_job(job_id: str, tickers: List[str], latest_only: bool) -> None:
+    """
+    Execute batch sequentially in background to avoid request timeout on hosting platforms.
+    """
+    try:
+        await _update_batch_job(job_id, status="running")
+        for sym in tickers:
+            sym = sym.strip().upper()
+            await _update_batch_job(job_id, current=sym)
+            try:
+                year = None
+                quarter = None
+                if latest_only:
+                    year, quarter = await _resolve_latest_quarter(sym)
+                res = (
+                    await analyze_earnings_async(sym, year, quarter)
+                    if year and quarter
+                    else None
+                )
+                row = {"symbol": sym, "status": "ok", "payload": res}
+            except Exception as exc:  # noqa: BLE001
+                row = {"symbol": sym, "status": "error", "error": str(exc)}
+            await _append_batch_result(job_id, row)
+        await _update_batch_job(job_id, status="completed", current=None)
+    except Exception as exc:  # noqa: BLE001
+        logging.exception("Batch job %s failed: %s", job_id, exc)
+        await _update_batch_job(job_id, status="failed", error=str(exc), current=None)
+
+
 @app.get("/api/symbols")
 def api_symbols(q: str = Query("", description="Search term for company name or ticker")) -> List[dict]:
     try:
@@ -292,50 +412,25 @@ async def api_analyze(payload: AnalyzeRequest):
 @app.post("/api/batch-analyze")
 async def api_batch_analyze(payload: BatchAnalyzeRequest):
     """
-    Simple batch endpoint: takes tickers, fetches latest quarter per ticker (if latest_only),
-    and analyzes sequentially. Returns results inline for simplicity.
+    Enqueue a batch job and return job_id immediately. Processing happens in background.
     """
     tickers = [t.strip().upper() for t in payload.tickers if t.strip()]
     if not tickers:
         raise HTTPException(status_code=400, detail="tickers is required")
 
-    results: List[Dict] = []
+    job_id = await _create_batch_job(tickers, payload.latest_only)
+    return {"job_id": job_id, "status": "queued", "total": len(tickers)}
 
-    async def _analyze_one(sym: str):
-        try:
-            # latest quarter if requested
-            year = None
-            quarter = None
-            if payload.latest_only:
-                dates = get_transcript_dates(sym)
-                # Prefer fiscal year/quarter, but fall back to calendar if fiscal missing
-                valid = []
-                for d in dates:
-                    y = d.get("year") or d.get("calendar_year")
-                    q = d.get("quarter") or d.get("calendar_quarter")
-                    if y is None or q is None:
-                        continue
-                    try:
-                        valid.append((int(y), int(q)))
-                    except Exception:
-                        continue
-                if not valid:
-                    return {"symbol": sym, "status": "error", "error": "no transcript dates"}
-                valid.sort(reverse=True)
-                year, quarter = valid[0]
-            res = await analyze_earnings_async(sym, year, quarter) if year and quarter else None
-            return {
-                "symbol": sym,
-                "status": "ok",
-                "payload": res,
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {"symbol": sym, "status": "error", "error": str(exc)}
 
-    for sym in tickers:
-        results.append(await _analyze_one(sym))
-
-    return {"results": results}
+@app.get("/api/batch-analyze/{job_id}")
+async def api_batch_status(job_id: str):
+    """
+    Poll batch job status/results.
+    """
+    job = await _get_batch_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="batch job not found")
+    return job
 
 
 @app.post("/api/translate", response_model=TranslateResponse)
