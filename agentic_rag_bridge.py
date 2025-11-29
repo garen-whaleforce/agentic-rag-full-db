@@ -175,18 +175,18 @@ def _push_dir(path: Path):
 def _resolve_models(main_model: Optional[str], helper_model: Optional[str]) -> Dict[str, Any]:
     """Return sanitized models and matching temperatures for main/helper agents."""
     main_defaults = {
-        "gpt-5.1": 1.0,
-        "gpt-5-mini": 1.0,
-        "gpt-4o-mini": 0.0,
+        "gpt-5.1": 0.7,
+        "gpt-5-mini": 0.7,
+        "gpt-4o-mini": 0.3,
     }
     helper_defaults = {
-        "gpt-5-mini": 1.0,
-        "gpt-5-nano": 1.0,
-        "gpt-4o-mini": 0.0,
+        "gpt-5-mini": 0.3,
+        "gpt-5-nano": 0.3,
+        "gpt-4o-mini": 0.3,
     }
 
-    chosen_main = main_model if main_model in main_defaults else "gpt-4o-mini"
-    chosen_helper = helper_model if helper_model in helper_defaults else "gpt-4o-mini"
+    chosen_main = main_model if main_model in main_defaults else "gpt-5.1"
+    chosen_helper = helper_model if helper_model in helper_defaults else "gpt-5-mini"
 
     return {
         "main_model": chosen_main,

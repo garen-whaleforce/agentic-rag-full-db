@@ -15,7 +15,7 @@ import re
 
 from neo4j import GraphDatabase
 
-from agents.prompts.prompts import financials_statement_agent_prompt
+from agents.prompts.prompts import FINANCIALS_SYSTEM_MESSAGE, financials_statement_agent_prompt
 from utils.llm import build_chat_client, build_embeddings
 
 # -------------------------------------------------------------------------
@@ -64,8 +64,8 @@ class HistoricalPerformanceAgent:
     def __init__(
         self,
         credentials_file: str = "credentials.json",
-        model: str = "gpt-4o-mini",
-        temperature: float = 0.0,
+        model: str = "gpt-5-mini",
+        temperature: float = 0.3,
     ) -> None:
         creds = json.loads(Path(credentials_file).read_text())
         self.client, resolved_model = build_chat_client(creds, model)
@@ -245,7 +245,7 @@ class HistoricalPerformanceAgent:
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "You are a financial forecasting assistant."},
+                {"role": "system", "content": FINANCIALS_SYSTEM_MESSAGE},
                 {"role": "user", "content": prompt},
             ],
             temperature=self.temperature,

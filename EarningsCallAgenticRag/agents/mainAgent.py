@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Sequence, Union
 
 # ---- Centralised prompt imports -------------------------------------------
 from agents.prompts.prompts import (
+    DELEGATION_SYSTEM_MESSAGE,
+    EXTRACTION_SYSTEM_MESSAGE,
+    MAIN_AGENT_SYSTEM_MESSAGE,
     facts_delegation_prompt,
     facts_extraction_prompt,
     main_agent_prompt,
@@ -39,6 +42,7 @@ FIELD = re.compile(r"\*\*(.+?):\*\*\s*(.+)")
 
 DEFAULT_TRANSCRIPT_CHARS_PER_CHUNK = 8000
 MAX_FACTS_PER_HELPER = int(os.getenv("MAX_FACTS_PER_HELPER", "80"))
+MAX_PEERS = 10
 
 
 class TokenTracker:
@@ -113,8 +117,8 @@ class BaseHelperAgent:
 class MainAgent:
     credentials_file: Union[str, Path] | None = None
     credentials_path: Union[str, Path] | None = None
-    model: str = "gpt-4o-mini"
-    temperature: float = 0.0
+    model: str = "gpt-5.1"
+    temperature: float = 0.7
 
     financials_agent: BaseHelperAgent | None = None
     past_calls_agent: BaseHelperAgent | None = None
@@ -198,7 +202,7 @@ class MainAgent:
         for chunk in chunks:
             if not chunk:
                 continue
-            raw = self._chat(facts_extraction_prompt(chunk), system="You are a precise extraction bot.")
+            raw = self._chat(facts_extraction_prompt(chunk), system=EXTRACTION_SYSTEM_MESSAGE)
             items = _parse_items(raw)
             all_items.extend(items)
         return all_items
@@ -244,7 +248,7 @@ class MainAgent:
         # Step 1: Route facts using LLM
         routing_txt = self._chat(
             facts_delegation_prompt(items).replace("<list of peer tickers>", ", ".join(peers)),
-            system="Route each fact.",
+            system=DELEGATION_SYSTEM_MESSAGE,
         )
 
         # Step 2: Parse routing map
@@ -398,7 +402,7 @@ class MainAgent:
         print("\n==== MAIN AGENT FULL PROMPT ====")
         print(final_prompt)
         print("===============================\n")
-        return notes, self._chat(final_prompt, system="You are a seasoned portfolio manager.")
+        return notes, self._chat(final_prompt, system=MAIN_AGENT_SYSTEM_MESSAGE)
 
     # ---------------------------------------------------------------------
     # 4) Orchestrator
@@ -433,7 +437,7 @@ class MainAgent:
                     if sym not in seen:
                         seen.add(sym)
                         peers.append(sym)
-                    if len(peers) >= 5:
+                    if len(peers) >= MAX_PEERS:
                         break
         except Exception:
             peers = []

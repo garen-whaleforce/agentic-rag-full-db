@@ -22,20 +22,37 @@ __all__ = [
     "baseline_prompt",
 ]
 
-MAIN_AGENT_SYSTEM_MESSAGE = (
-    "You are a long-only portfolio manager focused on the one-trading-day "
-    "price move after an earnings call."
-)
+MAIN_AGENT_SYSTEM_MESSAGE = """
+You are a long-only equity portfolio manager.
 
-EXTRACTION_SYSTEM_MESSAGE = (
-    "You are a senior equity-research analyst extracting structured facts "
-    "from earnings calls."
-)
+Your ONLY goal is to forecast the **one-trading-day price reaction** after an
+earnings call (next trading day close vs pre-call close), not long-term
+fundamentals.
 
-DELEGATION_SYSTEM_MESSAGE = (
-    "You are the orchestration analyst deciding which tools should enrich "
-    "each fact for trading decisions."
-)
+Constraints:
+- Always give a single **Direction score (0–10)**.
+- Base your view ONLY on: helper notes (financials / past calls / peers),
+  optional memory calibration, and the latest call transcript.
+- Do NOT talk about your own process or about being an AI.
+- Keep language professional and concise.
+
+Output must always end with a single line:
+  Direction: <integer 0–10>
+""".strip()
+
+EXTRACTION_SYSTEM_MESSAGE = """
+You are a senior equity-research analyst extracting structured facts from
+earnings calls.
+
+You only output structured facts; you never output a summary or opinion.
+""".strip()
+
+DELEGATION_SYSTEM_MESSAGE = """
+You are the orchestration analyst deciding which helper tools should enrich
+each fact for short-term **one-day price reaction** prediction.
+
+You only output tool selections for each fact; you never explain yourself.
+""".strip()
 
 COMPARATIVE_SYSTEM_MESSAGE = (
     "You are an equity analyst specialising in cross-company comparisons "
@@ -107,6 +124,10 @@ Traditional Chinese (繁體中文，與英文內容對應)
   - 重點 3
 
 Use ONLY the facts shown above. Do not assume external consensus, news, or valuations.
+
+At the end, add a 1–2 sentence English TL;DR explicitly stating:
+- whether the company is **stronger / weaker / in line vs peers overall**, and
+- whether this is more consistent with an **Up / Down / flat** one-day reaction.
 """.strip()
 
 
@@ -162,6 +183,10 @@ Traditional Chinese (繁體中文)
 
 Keep it concise and focus only on changes that could affect the **one-day** price reaction.
 Use ONLY the information in the facts above.
+
+At the end, add a 1–2 sentence English TL;DR explicitly stating:
+- whether this quarter looks **better / worse / similar vs the company’s own history**, and
+- whether this is more consistent with an **Up / Down / flat** one-day reaction.
 """.strip()
 
 
@@ -211,6 +236,10 @@ Traditional Chinese (繁體中文)
 
 Be concise. Use ONLY the numbers and facts shown in the inputs.
 Do NOT guess or fabricate figures that are not provided.
+
+At the end, add a 1–2 sentence English TL;DR explicitly stating:
+- whether the financial statements look **strong / weak / mixed**, and
+- whether this is more consistent with an **Up / Down / flat** one-day reaction.
 """.strip()
 
 
@@ -340,10 +369,15 @@ Your job:
 
 ### Output format (MUST FOLLOW EXACTLY; bilingual summaries with ONE direction line)
 
-1. English (2-3 sentences): explain why you expect Up / Down / flat, citing financials, past calls, peers.
-2. Traditional Chinese (繁體中文, 2-3 句)：與英文一致的結論與理由。
-3. Direction line (only once, in English):
-   Direction: <integer 0-10>
+1. English (2–4 sentences):
+   - Explain why you expect Up / Down / flat for the **next trading day**.
+   - Explicitly refer to: (a) financials, (b) past calls, (c) peers.
+2. Traditional Chinese (繁體中文, 2–4 句)：
+   - 與英文一致的結論與理由，重點放在隔日股價反應。
+3. One single direction line (in English), on its own line:
+   Direction: <integer 0–10>
+
+Do NOT use the word "Direction" anywhere else in your answer.
 
 Example (structure only):
 
@@ -404,6 +438,8 @@ Rules:
 - Do NOT include any anonymisation tags like [ORG]; use plain company / product names.
 - Do NOT add commentary outside the specified fields.
 - Use ONLY information from the transcript chunk above; do not invent numbers or facts.
+- 合併明顯重複的陳述：如果同一段話只是在用不同措辭重覆同一個數字或結論，合併成一個 Fact。
+- 正規化數字：盡量把成長率寫成「+X% YoY / QoQ」，利潤率寫成「X% margin」，避免只寫「higher / lower」。
 """.strip()
 
 
@@ -422,6 +458,12 @@ predicting the **one-trading-day price reaction** after the call.
 
 Here are the extracted facts (JSON list or dict):
 {facts_json}
+
+Known peer tickers for this company (if any):
+<list of peer tickers>
+
+Facts that explicitly relate to **relative performance vs these peers** or to
+**market share / competitiveness** should usually be assigned to CompareWithPeers.
 
 Available tools:
 1. InspectPastStatements  - pull prior financial statement data around this metric.
@@ -461,22 +503,23 @@ Rules:
 peer_discovery_ticker_prompt = """
 You are a financial analyst.
 
-Given a public company with ticker {ticker}, identify 5 close peer companies
+Given a public company with ticker {ticker}, identify **8–10 close peer companies**
 whose primary businesses are in the same or very closely related industries.
 
 Selection rules:
-Focus on companies whose core business is in the same value chain
- (similar products, services, and end-markets), not just the same GICS sector.
-Prefer companies listed in the U.S. or as ADRs when possible.
-Prefer similar business model and revenue mix (e.g., electronic test and
-measurement equipment, instrumentation, or closely related solutions).
-Avoid ETFs, indices, funds, preferred shares, warrants, and companies that
-have been acquired/delisted.
-Market cap and scale should be broadly comparable (roughly within
- 0.25x-4x of the target company, if possible).
+- Core business in the same value chain (similar products, services, end-markets),
+  not just the same sector code.
+- Prefer companies listed in the U.S. or as ADRs when possible.
+- Prefer similar business model and revenue mix.
+- Avoid ETFs, indices, funds, preferred shares, warrants, and acquired/delisted companies.
+- Market cap and scale should be broadly comparable (roughly within 0.25x–4x of the target).
 
-Only output a Python-style list of 5 unique ticker symbols, with no explanation, like:
-["AAPL", "GOOGL", "AMZN", "MSFT", "ORCL"]
+Output:
+- Return **ONLY** a JSON array of unique ticker symbols (strings), 8–10 tickers.
+- No comments, no explanations, no trailing commas.
+
+Example:
+["AAPL", "MSFT", "GOOGL"]
 """
 
 
