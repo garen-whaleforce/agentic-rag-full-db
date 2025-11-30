@@ -497,12 +497,15 @@ async function runAnalysis() {
   const [yearStr, quarterStr] = datesSelect.value.split("|");
   const mainModel = (mainModelSelect && mainModelSelect.value) || "gpt-5.1";
   const helperModel = (helperModelSelect && helperModelSelect.value) || "gpt-5-mini";
+  const refreshCheck = document.getElementById("refresh-check");
+  const refresh = refreshCheck ? refreshCheck.checked : false;
   const payload = {
     symbol: selectedSymbol,
     year: Number(yearStr),
     quarter: Number(quarterStr),
     main_model: mainModel,
     helper_model: helperModel,
+    refresh: refresh,
   };
 
   analyzeBtn.disabled = true;

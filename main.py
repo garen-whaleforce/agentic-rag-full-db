@@ -183,6 +183,7 @@ class AnalyzeRequest(BaseModel):
     helper_model: Optional[Literal["gpt-5-mini", "gpt-4o-mini"]] = Field(
         None, description="Helper agents model override"
     )
+    refresh: bool = Field(False, description="Skip cache and force re-analysis")
 
 class BatchAnalyzeRequest(BaseModel):
     tickers: list[str] = Field(..., description="List of ticker symbols")
@@ -442,6 +443,7 @@ async def api_analyze(payload: AnalyzeRequest):
             payload.quarter,
             payload.main_model,
             payload.helper_model,
+            skip_cache=payload.refresh,
         )
         return JSONResponse(result)
     except ValueError as exc:

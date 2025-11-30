@@ -169,35 +169,37 @@ async def analyze_earnings_async(
     quarter: int,
     main_model: Optional[str] = None,
     helper_model: Optional[str] = None,
+    skip_cache: bool = False,
 ) -> Dict:
     """
     Async wrapper: fetch context in parallel and run agentic pipeline in thread to avoid blocking event loop.
     """
     cache_key = f"call:{symbol.upper()}:{year}:Q{quarter}"
 
-    # 1) Redis cache
-    cached_payload = await cache_get_json(cache_key)
-    if isinstance(cached_payload, dict) and cached_payload.get("symbol"):
-        return cached_payload
+    if not skip_cache:
+        # 1) Redis cache
+        cached_payload = await cache_get_json(cache_key)
+        if isinstance(cached_payload, dict) and cached_payload.get("symbol"):
+            return cached_payload
 
-    # 2) DB cache
-    try:
-        db_cached = get_cached_payload(
-            symbol=symbol,
-            fiscal_year=year,
-            fiscal_quarter=quarter,
-            max_age_minutes=PAYLOAD_CACHE_MINUTES,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("get_cached_payload failed, ignoring cache", exc_info=exc)
-        db_cached = None
-
-    if isinstance(db_cached, dict) and db_cached.get("symbol"):
+        # 2) DB cache
         try:
-            await cache_set_json(cache_key, db_cached, REDIS_PAYLOAD_TTL_SECONDS)
-        except Exception:
-            pass
-        return db_cached
+            db_cached = get_cached_payload(
+                symbol=symbol,
+                fiscal_year=year,
+                fiscal_quarter=quarter,
+                max_age_minutes=PAYLOAD_CACHE_MINUTES,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("get_cached_payload failed, ignoring cache", exc_info=exc)
+            db_cached = None
+
+        if isinstance(db_cached, dict) and db_cached.get("symbol"):
+            try:
+                await cache_set_json(cache_key, db_cached, REDIS_PAYLOAD_TTL_SECONDS)
+            except Exception:
+                pass
+            return db_cached
 
     job_id = str(uuid4())
     context = await get_earnings_context_async(symbol, year, quarter)
