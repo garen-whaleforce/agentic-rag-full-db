@@ -167,41 +167,23 @@ class ComparativeAgent:
                     return all_results
 
                 if tickers_in_sector:
-                    if use_batch_peer_query:
-                        res = ses.run(
-                            """
-                            CALL db.index.vector.queryNodes('fact_index', $topK, $vec)
-                            YIELD node, score
-                            WHERE node.ticker IN $peer_ticker_list AND score > $min_score
-                            OPTIONAL MATCH (node)-[:HAS_VALUE]->(v:Value)
-                            OPTIONAL MATCH (node)-[:EXPLAINED_BY]->(r:Reason)
-                            RETURN node.text AS text, node.metric AS metric, v.content AS value,
-                                   r.content AS reason, node.ticker AS ticker,
-                                   node.quarter AS quarter, score
-                            ORDER BY score DESC
-                            LIMIT 10
-                            """,
-                            {"topK": top_k, "vec": vec, "peer_ticker_list": tickers_in_sector, "min_score": 0.3},
-                        )
-                        all_results.extend([dict(r) for r in res])
-                    else:
-                        for peer_ticker in tickers_in_sector:
-                            res = ses.run(
-                                """
-                                CALL db.index.vector.queryNodes('fact_index', $topK, $vec)
-                                YIELD node, score
-                                WHERE node.ticker = $peer_ticker AND score > $min_score
-                                OPTIONAL MATCH (node)-[:HAS_VALUE]->(v:Value)
-                                OPTIONAL MATCH (node)-[:EXPLAINED_BY]->(r:Reason)
-                                RETURN node.text AS text, node.metric AS metric, v.content AS value,
-                                       r.content AS reason, node.ticker AS ticker,
-                                       node.quarter AS quarter, score
-                                ORDER BY score DESC
-                                LIMIT 10
-                                """,
-                                {"topK": top_k, "vec": vec, "peer_ticker": peer_ticker, "min_score": 0.3},
-                            )
-                            all_results.extend([dict(r) for r in res])
+                    # Always use batch query for sector-based searches to avoid N individual queries
+                    res = ses.run(
+                        """
+                        CALL db.index.vector.queryNodes('fact_index', $topK, $vec)
+                        YIELD node, score
+                        WHERE node.ticker IN $peer_ticker_list AND score > $min_score
+                        OPTIONAL MATCH (node)-[:HAS_VALUE]->(v:Value)
+                        OPTIONAL MATCH (node)-[:EXPLAINED_BY]->(r:Reason)
+                        RETURN node.text AS text, node.metric AS metric, v.content AS value,
+                               r.content AS reason, node.ticker AS ticker,
+                               node.quarter AS quarter, score
+                        ORDER BY score DESC
+                        LIMIT 10
+                        """,
+                        {"topK": top_k, "vec": vec, "peer_ticker_list": tickers_in_sector, "min_score": 0.3},
+                    )
+                    all_results.extend([dict(r) for r in res])
                     all_results.sort(key=lambda x: x.get('score', 0), reverse=True)
                     return all_results
 

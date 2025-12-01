@@ -228,6 +228,17 @@ def run_single_call_from_context(
 
     quarter_label = f"{year}-Q{quarter}"
     sector_map = _load_sector_map(repo_path)
+
+    # FMP API fallback: If symbol not in sector_map CSV, query FMP for sector
+    if symbol not in sector_map:
+        try:
+            from fmp_client import get_company_profile
+            profile = get_company_profile(symbol)
+            if profile and profile.get("sector"):
+                sector_map[symbol] = profile["sector"]
+        except Exception:
+            pass  # Silently fall back to full DB scan if FMP fails
+
     model_cfg = _resolve_models(main_model, helper_model)
 
     with _push_dir(repo_path):
