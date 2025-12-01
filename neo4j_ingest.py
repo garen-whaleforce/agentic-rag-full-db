@@ -190,7 +190,7 @@ def ingest_recent_history_into_neo4j(context: Dict[str, Any], max_quarters: int 
     if not past_sorted:
         return
 
-    idx = IndexFacts(credentials_file=str(cred_path), prefer_openai=True)
+    idx = IndexFacts(credentials_file=str(cred_path), prefer_openai=False)
     try:
         for pq in past_sorted:
             q_label = f"{pq['year']}-Q{pq['quarter']}"
@@ -240,7 +240,7 @@ def ingest_context_into_neo4j(context: Dict[str, Any]) -> None:
 
     quarter_label = f"{year}-Q{quarter}"
 
-    idx = IndexFacts(credentials_file=str(cred_path), prefer_openai=True)
+    idx = IndexFacts(credentials_file=str(cred_path), prefer_openai=False)
     try:
         facts: List[Dict[str, Any]] = []
         if transcript_text:

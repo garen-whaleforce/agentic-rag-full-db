@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 import concurrent.futures
 
 from neo4j import GraphDatabase
+from openai import OpenAI
 
 from agents.prompts.prompts import facts_extraction_prompt
 from utils.llm import build_chat_client
@@ -60,6 +61,10 @@ class IndexFacts:
         creds = json.loads(Path(credentials_file).read_text())
         self.client, resolved_model = build_chat_client(creds, openai_model, prefer_openai=prefer_openai)
         self.model = resolved_model
+        # Separate OpenAI client for embeddings (always use OpenAI direct for text-embedding-3-small)
+        import os
+        openai_key = creds.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        self.embedding_client = OpenAI(api_key=openai_key) if openai_key else self.client
         self.driver = GraphDatabase.driver(
             creds["neo4j_uri"], auth=(creds["neo4j_username"], creds["neo4j_password"])
         )
@@ -174,8 +179,8 @@ class IndexFacts:
 
     # ------------------------------------------------------------------
     def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a fact using OpenAI's embedding API."""
-        response = self.client.embeddings.create(
+        """Generate embedding for a fact using OpenAI's embedding API (direct connection)."""
+        response = self.embedding_client.embeddings.create(
             model="text-embedding-3-small",
             input=text
         )
