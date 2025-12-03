@@ -204,7 +204,9 @@ async def _schedule_earnings_calendar_prefetch():
                     today = datetime.utcnow().date()
                 start = today - timedelta(days=7)
                 try:
-                    get_earnings_calendar_for_range(
+                    # Run blocking function in thread pool to avoid blocking event loop
+                    await asyncio.to_thread(
+                        get_earnings_calendar_for_range,
                         start_date=start.isoformat(),
                         end_date=today.isoformat(),
                         min_market_cap=1_000_000_000,
@@ -221,8 +223,9 @@ async def _schedule_earnings_calendar_prefetch():
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Ticker symbol, e.g., AAPL")
-    year: int = Field(..., description="Fiscal year")
-    quarter: int = Field(..., description="Fiscal quarter (1-4)")
+    year: Optional[int] = Field(None, description="Fiscal year (required if date not provided)")
+    quarter: Optional[int] = Field(None, description="Fiscal quarter 1-4 (required if date not provided)")
+    date: Optional[str] = Field(None, description="Earnings date YYYY-MM-DD. If provided, fiscal year/quarter will be looked up from FMP")
     main_model: Optional[Literal["gpt-5.1", "gpt-5-mini", "gpt-4o-mini"]] = Field(
         None, description="Main agent model override"
     )
@@ -496,15 +499,37 @@ def api_earnings_calendar_today(
 @app.post("/api/analyze")
 async def api_analyze(payload: AnalyzeRequest):
     try:
+        year = payload.year
+        quarter = payload.quarter
+
+        # If date is provided, look up fiscal year/quarter from FMP
+        if payload.date:
+            from fmp_client import get_fiscal_quarter_by_date
+            fiscal_info = get_fiscal_quarter_by_date(payload.symbol, payload.date)
+            if fiscal_info is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No transcript found for {payload.symbol} on date {payload.date}"
+                )
+            year = fiscal_info["year"]
+            quarter = fiscal_info["quarter"]
+        elif year is None or quarter is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Either 'date' or both 'year' and 'quarter' must be provided"
+            )
+
         result = await analyze_earnings_async(
             payload.symbol,
-            payload.year,
-            payload.quarter,
+            year,
+            quarter,
             payload.main_model,
             payload.helper_model,
             skip_cache=payload.refresh,
         )
         return JSONResponse(result)
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

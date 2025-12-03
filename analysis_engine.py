@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from agentic_rag_bridge import AgenticRagBridgeError, run_single_call_from_context
 from neo4j_ingest import Neo4jIngestError, ingest_context_into_neo4j, ingest_recent_history_into_neo4j
-from fmp_client import get_earnings_context, get_earnings_context_async
+from fmp_client import get_earnings_context, get_earnings_context_async, NoTranscriptError
 from storage import (
     record_analysis,
     get_cached_payload,
@@ -29,6 +29,14 @@ def run_agentic_rag(
     """
     Call the real Agentic RAG pipeline via the bridge module.
     """
+    # Early check: fail fast if transcript is empty (don't wait 600s timeout)
+    transcript_text = context.get("transcript_text") or ""
+    if not transcript_text.strip():
+        symbol = context.get("symbol") or context.get("ticker") or "UNKNOWN"
+        year = context.get("year")
+        quarter = context.get("quarter")
+        raise NoTranscriptError(f"No transcript available for {symbol} FY{year} Q{quarter}")
+
     def _add_ingest_warning(msg: str) -> None:
         if not msg:
             return

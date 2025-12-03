@@ -572,73 +572,219 @@ def get_transcript_dates(symbol: str) -> List[Dict]:
     return normalized
 
 
-def get_transcript(symbol: str, year: int, quarter: int) -> Dict:
+def get_fiscal_quarter_by_date(symbol: str, target_date: str, tolerance_days: int = 30) -> Optional[Dict[str, int]]:
     """
-    Call FMP Earnings Transcript API.
+    Look up the fiscal year and quarter for a given earnings date.
+    Supports fuzzy matching - finds the closest date within tolerance.
+
+    Args:
+        symbol: Ticker symbol (e.g., 'LULU')
+        target_date: Earnings date in YYYY-MM-DD format (e.g., '2025-09-04')
+        tolerance_days: Maximum days difference to consider a match (default: 30)
+
+    Returns:
+        Dict with 'year', 'quarter', and 'matched_date' if found, None otherwise.
+        Example: {'year': 2025, 'quarter': 2, 'matched_date': '2025-09-04'}
+    """
+    from datetime import datetime, timedelta
+
+    transcript_dates = get_transcript_dates(symbol)
+    if not transcript_dates:
+        return None
+
+    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+
+    # First try exact match
+    for item in transcript_dates:
+        if item.get("date") == target_date:
+            return {"year": item["year"], "quarter": item["quarter"], "matched_date": target_date}
+
+    # If no exact match, find closest date within tolerance
+    best_match = None
+    min_diff = float('inf')
+
+    for item in transcript_dates:
+        item_date = item.get("date")
+        if not item_date:
+            continue
+        try:
+            item_dt = datetime.strptime(item_date, "%Y-%m-%d")
+            diff = abs((target_dt - item_dt).days)
+            if diff < min_diff and diff <= tolerance_days:
+                min_diff = diff
+                best_match = item
+        except ValueError:
+            continue
+
+    if best_match:
+        return {
+            "year": best_match["year"],
+            "quarter": best_match["quarter"],
+            "matched_date": best_match["date"]
+        }
+
+    return None
+
+
+class NoTranscriptError(ValueError):
+    """Raised when no transcript is available after retries."""
+    pass
+
+
+def get_transcript(symbol: str, year: int, quarter: int, max_retries: int = 3) -> Dict:
+    """
+    Call FMP Earnings Transcript API with retry logic.
+
+    Retries up to max_retries times if transcript content is empty.
+    Raises NoTranscriptError immediately if no transcript found (no 600s wait).
     """
     _require_api_key()
     cache_ttl = int(os.getenv("TRANSCRIPT_CACHE_MIN", "10080"))  # default 7 days
     cache_key = f"fmp:transcript:{symbol.upper()}:{year}:{quarter}"
     cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
     if cached:
-        return cached
+        # Validate cached content is not empty
+        if cached.get("content") and cached["content"].strip():
+            return cached
+        # Clear invalid cache entry
+        logger.warning("Cached transcript for %s FY%s Q%s is empty, refetching", symbol, year, quarter)
 
     client = _get_client()
-    resp = _get(
-        client,
-        "earning-call-transcript",
-        params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
-    )
-    resp.raise_for_status()
-    data = resp.json() or []
+    last_error: Exception | None = None
 
-    if not data:
-        raise ValueError(f"No transcript found for {symbol} FY{year} Q{quarter}")
+    for attempt in range(max_retries):
+        try:
+            resp = _get(
+                client,
+                "earning-call-transcript",
+                params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
+            )
+            resp.raise_for_status()
+            data = resp.json() or []
 
-    first = data[0]
-    out = {
-        "symbol": symbol,
-        "year": year,
-        "quarter": quarter,
-        "date": first.get("date") or first.get("reportDate"),
-        "content": first.get("content") or "",
-    }
-    set_fmp_cache(cache_key, out)
-    return out
+            if not data:
+                last_error = NoTranscriptError(f"No transcript found for {symbol} FY{year} Q{quarter}")
+                if attempt < max_retries - 1:
+                    logger.warning("No transcript data for %s FY%s Q%s, retry %d/%d",
+                                   symbol, year, quarter, attempt + 1, max_retries)
+                    time.sleep(1.0 * (attempt + 1))  # Exponential backoff
+                    continue
+                raise last_error
+
+            first = data[0]
+            content = first.get("content") or ""
+
+            # Validate content is not empty
+            if not content.strip():
+                last_error = NoTranscriptError(f"No transcript content for {symbol} FY{year} Q{quarter} (empty response)")
+                if attempt < max_retries - 1:
+                    logger.warning("Empty transcript content for %s FY%s Q%s, retry %d/%d",
+                                   symbol, year, quarter, attempt + 1, max_retries)
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error
+
+            out = {
+                "symbol": symbol,
+                "year": year,
+                "quarter": quarter,
+                "date": first.get("date") or first.get("reportDate"),
+                "content": content,
+            }
+            set_fmp_cache(cache_key, out)
+            return out
+
+        except NoTranscriptError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                logger.warning("Error fetching transcript for %s FY%s Q%s: %s, retry %d/%d",
+                               symbol, year, quarter, exc, attempt + 1, max_retries)
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            raise
+
+    # Should not reach here, but just in case
+    if last_error:
+        raise last_error
+    raise NoTranscriptError(f"No transcript available for {symbol} FY{year} Q{quarter}")
 
 
-async def _get_transcript_async(symbol: str, year: int, quarter: int) -> Dict:
+async def _get_transcript_async(symbol: str, year: int, quarter: int, max_retries: int = 3) -> Dict:
     """
-    Async transcript fetch with cache.
+    Async transcript fetch with cache and retry logic.
+
+    Retries up to max_retries times if transcript content is empty.
+    Raises NoTranscriptError immediately if no transcript found.
     """
     _require_api_key()
     cache_ttl = int(os.getenv("TRANSCRIPT_CACHE_MIN", "10080"))  # default 7 days
     cache_key = f"fmp:transcript:{symbol.upper()}:{year}:{quarter}"
     cached = get_fmp_cache(cache_key, max_age_minutes=cache_ttl)
     if cached:
-        return cached
+        # Validate cached content is not empty
+        if cached.get("content") and cached["content"].strip():
+            return cached
+        logger.warning("Cached transcript for %s FY%s Q%s is empty, refetching", symbol, year, quarter)
 
     client = _get_async_client()
-    resp = await _aget(
-        client,
-        "earning-call-transcript",
-        params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
-    )
-    data = resp.json() or []
+    last_error: Exception | None = None
 
-    if not data:
-        raise ValueError(f"No transcript found for {symbol} FY{year} Q{quarter}")
+    for attempt in range(max_retries):
+        try:
+            resp = await _aget(
+                client,
+                "earning-call-transcript",
+                params={"symbol": symbol, "year": year, "quarter": quarter, "apikey": FMP_API_KEY},
+            )
+            data = resp.json() or []
 
-    first = data[0]
-    out = {
-        "symbol": symbol,
-        "year": year,
-        "quarter": quarter,
-        "date": first.get("date") or first.get("reportDate"),
-        "content": first.get("content") or "",
-    }
-    set_fmp_cache(cache_key, out)
-    return out
+            if not data:
+                last_error = NoTranscriptError(f"No transcript found for {symbol} FY{year} Q{quarter}")
+                if attempt < max_retries - 1:
+                    logger.warning("No transcript data for %s FY%s Q%s, retry %d/%d",
+                                   symbol, year, quarter, attempt + 1, max_retries)
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error
+
+            first = data[0]
+            content = first.get("content") or ""
+
+            if not content.strip():
+                last_error = NoTranscriptError(f"No transcript content for {symbol} FY{year} Q{quarter} (empty response)")
+                if attempt < max_retries - 1:
+                    logger.warning("Empty transcript content for %s FY%s Q%s, retry %d/%d",
+                                   symbol, year, quarter, attempt + 1, max_retries)
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error
+
+            out = {
+                "symbol": symbol,
+                "year": year,
+                "quarter": quarter,
+                "date": first.get("date") or first.get("reportDate"),
+                "content": content,
+            }
+            set_fmp_cache(cache_key, out)
+            return out
+
+        except NoTranscriptError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                logger.warning("Error fetching transcript for %s FY%s Q%s: %s, retry %d/%d",
+                               symbol, year, quarter, exc, attempt + 1, max_retries)
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            raise
+
+    if last_error:
+        raise last_error
+    raise NoTranscriptError(f"No transcript available for {symbol} FY{year} Q{quarter}")
 
 
 def get_quarterly_financials(symbol: str, limit: int = 4) -> Dict:
